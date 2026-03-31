@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { sendCommandToFigma, joinChannel, getConnectionStatus } from "../utils/websocket";
-import { filterFigmaNode } from "../utils/figma-helpers";
+import { filterFigmaNode, summarizeFigmaDocument } from "../utils/figma-helpers";
 
 /**
  * Register document-related tools to the MCP server
@@ -11,17 +11,17 @@ export function registerDocumentTools(server: McpServer): void {
   // Document Info Tool
   server.tool(
     "get_document_info",
-    "Get detailed information about the current Figma document",
+    "Get a shallow summary of the current Figma document: document name/id, list of pages, and top-level frames per page (id, name, type, bounding box). Use get_node_info or get_nodes_info to inspect specific nodes in detail.",
     {},
     async () => {
       try {
         const result = await sendCommandToFigma("get_document_info");
-        const filtered = filterFigmaNode(result) ?? result;
+        const summary = summarizeFigmaDocument(result);
         return {
           content: [
             {
               type: "text",
-              text: JSON.stringify(filtered)
+              text: JSON.stringify(summary)
             }
           ]
         };
