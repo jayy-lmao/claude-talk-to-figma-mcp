@@ -1,0 +1,410 @@
+import { z } from "zod";
+import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { sendCommandToFigma } from "../utils/websocket";
+import { applyColorDefaults, applyDefault, FIGMA_DEFAULTS } from "../utils/defaults";
+
+/**
+ * Register compound tools to the MCP server.
+ * Compound tools combine multiple logical steps into a single operation to
+ * reduce round-trips and speed up iteration cycles.
+ * @param server - The MCP server instance
+ */
+export function registerCompoundTools(server: McpServer): void {
+  // ── Create Frame with Auto-Layout ────────────────────────────────────────
+  // Combines create_frame + set_auto_layout into a single call.
+  server.tool(
+    "create_frame_with_autolayout",
+    "Create a new frame in Figma and immediately configure its auto-layout settings in a single operation. Combines create_frame and set_auto_layout.",
+    {
+      // Frame creation params
+      x: z.number().describe("X position (local coordinates, relative to parent)"),
+      y: z.number().describe("Y position (local coordinates, relative to parent)"),
+      width: z.number().describe("Width of the frame"),
+      height: z.number().describe("Height of the frame"),
+      name: z.string().optional().describe("Optional name for the frame"),
+      parentId: z.string().optional().describe("Optional parent node ID to append the frame to"),
+      fillColor: z
+        .object({
+          r: z.number().min(0).max(1).describe("Red component (0-1)"),
+          g: z.number().min(0).max(1).describe("Green component (0-1)"),
+          b: z.number().min(0).max(1).describe("Blue component (0-1)"),
+          a: z.number().min(0).max(1).optional().describe("Alpha component (0-1)"),
+        })
+        .optional()
+        .describe("Fill color in RGBA format"),
+      strokeColor: z
+        .object({
+          r: z.number().min(0).max(1).describe("Red component (0-1)"),
+          g: z.number().min(0).max(1).describe("Green component (0-1)"),
+          b: z.number().min(0).max(1).describe("Blue component (0-1)"),
+          a: z.number().min(0).max(1).optional().describe("Alpha component (0-1)"),
+        })
+        .optional()
+        .describe("Stroke color in RGBA format"),
+      strokeWeight: z.number().positive().optional().describe("Stroke weight"),
+      // Auto-layout params
+      layoutMode: z
+        .enum(["HORIZONTAL", "VERTICAL", "NONE"])
+        .describe("Auto-layout direction"),
+      paddingTop: z.number().optional().describe("Top padding in pixels"),
+      paddingBottom: z.number().optional().describe("Bottom padding in pixels"),
+      paddingLeft: z.number().optional().describe("Left padding in pixels"),
+      paddingRight: z.number().optional().describe("Right padding in pixels"),
+      itemSpacing: z.number().optional().describe("Spacing between items in pixels"),
+      primaryAxisAlignItems: z
+        .enum(["MIN", "CENTER", "MAX", "SPACE_BETWEEN"])
+        .optional()
+        .describe("Alignment along the primary axis"),
+      counterAxisAlignItems: z
+        .enum(["MIN", "CENTER", "MAX"])
+        .optional()
+        .describe("Alignment along the counter axis"),
+      layoutWrap: z
+        .enum(["WRAP", "NO_WRAP"])
+        .optional()
+        .describe("Whether items wrap to new lines"),
+      strokesIncludedInLayout: z
+        .boolean()
+        .optional()
+        .describe("Whether strokes are included in layout calculations"),
+    },
+    async ({
+      x, y, width, height, name, parentId, fillColor, strokeColor, strokeWeight,
+      layoutMode, paddingTop, paddingBottom, paddingLeft, paddingRight,
+      itemSpacing, primaryAxisAlignItems, counterAxisAlignItems, layoutWrap,
+      strokesIncludedInLayout,
+    }) => {
+      try {
+        // Step 1: create the frame
+        const frameResult = await sendCommandToFigma("create_frame", {
+          x,
+          y,
+          width,
+          height,
+          name: name || "Frame",
+          parentId,
+          fillColor: fillColor || { r: 1, g: 1, b: 1, a: 1 },
+          strokeColor,
+          strokeWeight,
+        });
+        const typedFrame = frameResult as { name: string; id: string };
+
+        // Step 2: apply auto-layout
+        await sendCommandToFigma("set_auto_layout", {
+          nodeId: typedFrame.id,
+          layoutMode,
+          paddingTop,
+          paddingBottom,
+          paddingLeft,
+          paddingRight,
+          itemSpacing,
+          primaryAxisAlignItems,
+          counterAxisAlignItems,
+          layoutWrap,
+          strokesIncludedInLayout,
+        });
+
+        return {
+          content: [
+            {
+              type: "text",
+              text: `Created auto-layout frame "${typedFrame.name}" with ID: ${typedFrame.id} (layoutMode: ${layoutMode}). Use the ID as parentId to append children.`,
+            },
+          ],
+        };
+      } catch (error) {
+        return {
+          content: [
+            {
+              type: "text",
+              text: `Error creating frame with auto-layout: ${error instanceof Error ? error.message : String(error)}`,
+            },
+          ],
+        };
+      }
+    }
+  );
+
+  // ── Set Node Appearance ──────────────────────────────────────────────────
+  // Combines set_fill_color + set_stroke_color + set_corner_radius +
+  // set_node_properties (opacity) into one call.
+  server.tool(
+    "set_node_appearance",
+    "Set multiple visual properties of a node in a single operation. Combines set_fill_color, set_stroke_color, set_corner_radius, and opacity changes. Only the properties you provide are applied.",
+    {
+      nodeId: z.string().describe("The ID of the node to modify"),
+      fillColor: z
+        .object({
+          r: z.number().min(0).max(1).describe("Red component (0-1)"),
+          g: z.number().min(0).max(1).describe("Green component (0-1)"),
+          b: z.number().min(0).max(1).describe("Blue component (0-1)"),
+          a: z.number().min(0).max(1).optional().describe("Alpha component (0-1)"),
+        })
+        .optional()
+        .describe("Fill color in RGBA format"),
+      strokeColor: z
+        .object({
+          r: z.number().min(0).max(1).describe("Red component (0-1)"),
+          g: z.number().min(0).max(1).describe("Green component (0-1)"),
+          b: z.number().min(0).max(1).describe("Blue component (0-1)"),
+          a: z.number().min(0).max(1).optional().describe("Alpha component (0-1)"),
+        })
+        .optional()
+        .describe("Stroke color in RGBA format"),
+      strokeWeight: z.number().min(0).optional().describe("Stroke weight"),
+      cornerRadius: z.number().min(0).optional().describe("Corner radius in pixels"),
+      opacity: z
+        .number()
+        .min(0)
+        .max(1)
+        .optional()
+        .describe("Node opacity (0 = fully transparent, 1 = fully opaque)"),
+    },
+    async ({ nodeId, fillColor, strokeColor, strokeWeight, cornerRadius, opacity }) => {
+      const applied: string[] = [];
+      try {
+        if (fillColor !== undefined) {
+          const colorWithDefaults = applyColorDefaults(fillColor);
+          await sendCommandToFigma("set_fill_color", {
+            nodeId,
+            color: colorWithDefaults,
+          });
+          applied.push(
+            `fill RGBA(${fillColor.r}, ${fillColor.g}, ${fillColor.b}, ${colorWithDefaults.a})`
+          );
+        }
+
+        if (strokeColor !== undefined) {
+          const colorWithDefaults = applyColorDefaults(strokeColor);
+          const weight = applyDefault(strokeWeight, FIGMA_DEFAULTS.stroke.weight);
+          await sendCommandToFigma("set_stroke_color", {
+            nodeId,
+            color: colorWithDefaults,
+            strokeWeight: weight,
+          });
+          applied.push(
+            `stroke RGBA(${strokeColor.r}, ${strokeColor.g}, ${strokeColor.b}, ${colorWithDefaults.a}) weight=${weight}`
+          );
+        }
+
+        if (cornerRadius !== undefined) {
+          await sendCommandToFigma("set_corner_radius", {
+            nodeId,
+            radius: cornerRadius,
+            corners: [true, true, true, true],
+          });
+          applied.push(`cornerRadius=${cornerRadius}`);
+        }
+
+        if (opacity !== undefined) {
+          await sendCommandToFigma("set_node_properties", {
+            nodeId,
+            opacity,
+          });
+          applied.push(`opacity=${opacity}`);
+        }
+
+        if (applied.length === 0) {
+          return {
+            content: [
+              {
+                type: "text",
+                text: "No appearance properties were provided. Please specify at least one of: fillColor, strokeColor, cornerRadius, opacity.",
+              },
+            ],
+          };
+        }
+
+        return {
+          content: [
+            {
+              type: "text",
+              text: `Updated appearance of node ${nodeId}: ${applied.join(", ")}`,
+            },
+          ],
+        };
+      } catch (error) {
+        return {
+          content: [
+            {
+              type: "text",
+              text: `Error setting node appearance: ${error instanceof Error ? error.message : String(error)}`,
+            },
+          ],
+        };
+      }
+    }
+  );
+
+  // ── Bulk Create Nodes ────────────────────────────────────────────────────
+  // Create multiple nodes of various types in a single tool call.
+  const colorSchema = z
+    .object({
+      r: z.number().min(0).max(1).describe("Red component (0-1)"),
+      g: z.number().min(0).max(1).describe("Green component (0-1)"),
+      b: z.number().min(0).max(1).describe("Blue component (0-1)"),
+      a: z.number().min(0).max(1).optional().describe("Alpha component (0-1)"),
+    })
+    .describe("Color in RGBA format");
+
+  server.tool(
+    "bulk_create_nodes",
+    "Create multiple Figma nodes of various types in a single operation. Supports rectangles, frames, text nodes, and ellipses. Returns the ID and name of every created node.",
+    {
+      nodes: z
+        .array(
+          z.discriminatedUnion("type", [
+            z.object({
+              type: z.literal("rectangle"),
+              x: z.number().describe("X position"),
+              y: z.number().describe("Y position"),
+              width: z.number().describe("Width"),
+              height: z.number().describe("Height"),
+              name: z.string().optional().describe("Node name"),
+              parentId: z.string().optional().describe("Parent node ID"),
+              fillColor: colorSchema.optional(),
+              strokeColor: colorSchema.optional(),
+              strokeWeight: z.number().positive().optional().describe("Stroke weight"),
+            }),
+            z.object({
+              type: z.literal("frame"),
+              x: z.number().describe("X position"),
+              y: z.number().describe("Y position"),
+              width: z.number().describe("Width"),
+              height: z.number().describe("Height"),
+              name: z.string().optional().describe("Node name"),
+              parentId: z.string().optional().describe("Parent node ID"),
+              fillColor: colorSchema.optional(),
+              strokeColor: colorSchema.optional(),
+              strokeWeight: z.number().positive().optional().describe("Stroke weight"),
+            }),
+            z.object({
+              type: z.literal("text"),
+              x: z.number().describe("X position"),
+              y: z.number().describe("Y position"),
+              text: z.string().describe("Text content"),
+              fontSize: z.number().optional().describe("Font size (default: 14)"),
+              fontWeight: z.number().optional().describe("Font weight (default: 400)"),
+              fontColor: colorSchema.optional().describe("Font color (default: black)"),
+              name: z.string().optional().describe("Node name"),
+              parentId: z.string().optional().describe("Parent node ID"),
+              width: z.number().positive().optional().describe("Fixed width for the text node"),
+              textAlignHorizontal: z
+                .enum(["LEFT", "CENTER", "RIGHT", "JUSTIFIED"])
+                .optional()
+                .describe("Horizontal text alignment"),
+            }),
+            z.object({
+              type: z.literal("ellipse"),
+              x: z.number().describe("X position"),
+              y: z.number().describe("Y position"),
+              width: z.number().describe("Width"),
+              height: z.number().describe("Height"),
+              name: z.string().optional().describe("Node name"),
+              parentId: z.string().optional().describe("Parent node ID"),
+              fillColor: colorSchema.optional(),
+              strokeColor: colorSchema.optional(),
+              strokeWeight: z.number().positive().optional().describe("Stroke weight"),
+            }),
+          ])
+        )
+        .min(1)
+        .describe("Array of node definitions to create"),
+    },
+    async ({ nodes }) => {
+      const created: Array<{ index: number; type: string; name: string; id: string }> = [];
+      const errors: Array<{ index: number; type: string; error: string }> = [];
+
+      for (let i = 0; i < nodes.length; i++) {
+        const node = nodes[i];
+        try {
+          let result: unknown;
+          if (node.type === "rectangle") {
+            result = await sendCommandToFigma("create_rectangle", {
+              x: node.x,
+              y: node.y,
+              width: node.width,
+              height: node.height,
+              name: node.name || "Rectangle",
+              parentId: node.parentId,
+              fillColor: node.fillColor,
+              strokeColor: node.strokeColor,
+              strokeWeight: node.strokeWeight,
+            });
+          } else if (node.type === "frame") {
+            result = await sendCommandToFigma("create_frame", {
+              x: node.x,
+              y: node.y,
+              width: node.width,
+              height: node.height,
+              name: node.name || "Frame",
+              parentId: node.parentId,
+              fillColor: node.fillColor || { r: 1, g: 1, b: 1, a: 1 },
+              strokeColor: node.strokeColor,
+              strokeWeight: node.strokeWeight,
+            });
+          } else if (node.type === "text") {
+            result = await sendCommandToFigma("create_text", {
+              x: node.x,
+              y: node.y,
+              text: node.text,
+              fontSize: node.fontSize || 14,
+              fontWeight: node.fontWeight || 400,
+              fontColor: node.fontColor || { r: 0, g: 0, b: 0, a: 1 },
+              name: node.name || "Text",
+              parentId: node.parentId,
+              width: node.width,
+              textAlignHorizontal: node.textAlignHorizontal,
+            });
+          } else if (node.type === "ellipse") {
+            result = await sendCommandToFigma("create_ellipse", {
+              x: node.x,
+              y: node.y,
+              width: node.width,
+              height: node.height,
+              name: node.name || "Ellipse",
+              parentId: node.parentId,
+              fillColor: node.fillColor,
+              strokeColor: node.strokeColor,
+              strokeWeight: node.strokeWeight,
+            });
+          } else {
+            throw new Error(`Unsupported node type: ${(node as { type: string }).type}`);
+          }
+
+          const typedResult = result as { id: string; name: string };
+          created.push({ index: i, type: node.type, name: typedResult.name, id: typedResult.id });
+        } catch (error) {
+          errors.push({
+            index: i,
+            type: node.type,
+            error: error instanceof Error ? error.message : String(error),
+          });
+        }
+      }
+
+      const lines: string[] = [];
+      if (created.length > 0) {
+        lines.push(`Created ${created.length} node(s):`);
+        for (const c of created) {
+          lines.push(`  [${c.index}] ${c.type} "${c.name}" — ID: ${c.id}`);
+        }
+      }
+      if (errors.length > 0) {
+        lines.push(`Failed to create ${errors.length} node(s):`);
+        for (const e of errors) {
+          lines.push(`  [${e.index}] ${e.type} — ${e.error}`);
+        }
+      }
+
+      return {
+        content: [
+          {
+            type: "text",
+            text: lines.join("\n"),
+          },
+        ],
+      };
+    }
+  );
+}
