@@ -748,4 +748,354 @@ describe('compound tools', () => {
       expect(() => schema.parse({ componentKey: 'k', y: 0 })).toThrow();
     });
   });
+
+  // ── bulk_update_text ────────────────────────────────────────────────────
+
+  describe('bulk_update_text tool', () => {
+    it('calls set_text_content for each update', async () => {
+      await callTool('bulk_update_text', {
+        updates: [
+          { nodeId: 'n1', text: 'Hello' },
+          { nodeId: 'n2', text: 'World' },
+        ],
+      });
+
+      expect(mockSendCommand).toHaveBeenCalledTimes(2);
+      expect(mockSendCommand.mock.calls[0]).toEqual(['set_text_content', { nodeId: 'n1', text: 'Hello' }]);
+      expect(mockSendCommand.mock.calls[1]).toEqual(['set_text_content', { nodeId: 'n2', text: 'World' }]);
+    });
+
+    it('reports successes in the result text', async () => {
+      const result = await callTool('bulk_update_text', {
+        updates: [{ nodeId: 'node-abc', text: 'Sign up' }],
+      });
+
+      expect(result.content[0].text).toContain('Updated 1 text node(s)');
+      expect(result.content[0].text).toContain('node-abc');
+      expect(result.content[0].text).toContain('Sign up');
+    });
+
+    it('truncates long text in the summary to 40 chars with ellipsis', async () => {
+      const longText = 'A'.repeat(50);
+      const result = await callTool('bulk_update_text', {
+        updates: [{ nodeId: 'node-x', text: longText }],
+      });
+
+      expect(result.content[0].text).toContain('A'.repeat(40) + '…');
+    });
+
+    it('continues and reports failures without aborting the batch', async () => {
+      mockSendCommand
+        .mockResolvedValueOnce({}) // n1 succeeds
+        .mockRejectedValueOnce(new Error('node not found')) // n2 fails
+        .mockResolvedValueOnce({}); // n3 succeeds
+
+      const result = await callTool('bulk_update_text', {
+        updates: [
+          { nodeId: 'n1', text: 'Hello' },
+          { nodeId: 'n2', text: 'World' },
+          { nodeId: 'n3', text: 'Done' },
+        ],
+      });
+
+      expect(mockSendCommand).toHaveBeenCalledTimes(3);
+      expect(result.content[0].text).toContain('Updated 2 text node(s)');
+      expect(result.content[0].text).toContain('Failed to update 1 node(s)');
+      expect(result.content[0].text).toContain('node not found');
+    });
+
+    it('rejects an empty updates array', async () => {
+      const { schema } = handlers['bulk_update_text'];
+      expect(() => schema.parse({ updates: [] })).toThrow();
+    });
+
+    it('rejects when nodeId is missing', async () => {
+      const { schema } = handlers['bulk_update_text'];
+      expect(() => schema.parse({ updates: [{ text: 'hi' }] })).toThrow();
+    });
+  });
+
+  // ── swap_component_variant ──────────────────────────────────────────────
+
+  describe('swap_component_variant tool', () => {
+    it('calls set_instance_variant for each update', async () => {
+      await callTool('swap_component_variant', {
+        updates: [
+          { nodeId: 'btn-1', variantProperties: { State: 'Hover' } },
+          { nodeId: 'btn-2', variantProperties: { State: 'Disabled', Size: 'Large' } },
+        ],
+      });
+
+      expect(mockSendCommand).toHaveBeenCalledTimes(2);
+      expect(mockSendCommand.mock.calls[0]).toEqual([
+        'set_instance_variant',
+        { nodeId: 'btn-1', properties: { State: 'Hover' } },
+      ]);
+      expect(mockSendCommand.mock.calls[1]).toEqual([
+        'set_instance_variant',
+        { nodeId: 'btn-2', properties: { State: 'Disabled', Size: 'Large' } },
+      ]);
+    });
+
+    it('reports successes in the result text', async () => {
+      const result = await callTool('swap_component_variant', {
+        updates: [{ nodeId: 'inst-1', variantProperties: { State: 'Hover' } }],
+      });
+
+      expect(result.content[0].text).toContain('Updated variants on 1 instance(s)');
+      expect(result.content[0].text).toContain('inst-1');
+      expect(result.content[0].text).toContain('Hover');
+    });
+
+    it('continues and reports failures without aborting the batch', async () => {
+      mockSendCommand
+        .mockResolvedValueOnce({}) // btn-1 succeeds
+        .mockRejectedValueOnce(new Error('instance locked')); // btn-2 fails
+
+      const result = await callTool('swap_component_variant', {
+        updates: [
+          { nodeId: 'btn-1', variantProperties: { State: 'Hover' } },
+          { nodeId: 'btn-2', variantProperties: { State: 'Disabled' } },
+        ],
+      });
+
+      expect(mockSendCommand).toHaveBeenCalledTimes(2);
+      expect(result.content[0].text).toContain('Updated variants on 1 instance(s)');
+      expect(result.content[0].text).toContain('Failed to update 1 instance(s)');
+      expect(result.content[0].text).toContain('instance locked');
+    });
+
+    it('rejects an empty updates array', async () => {
+      const { schema } = handlers['swap_component_variant'];
+      expect(() => schema.parse({ updates: [] })).toThrow();
+    });
+
+    it('rejects when variantProperties is missing', async () => {
+      const { schema } = handlers['swap_component_variant'];
+      expect(() => schema.parse({ updates: [{ nodeId: 'n1' }] })).toThrow();
+    });
+  });
+
+  // ── build_screen_from_template ──────────────────────────────────────────
+
+  describe('build_screen_from_template tool', () => {
+    const baseArgs = {
+      screenName: 'Home Screen',
+      x: 0,
+      y: 0,
+      width: 375,
+      height: 812,
+      components: [
+        { componentKey: 'key-nav', x: 0, y: 0 },
+        { componentKey: 'key-hero', x: 0, y: 64 },
+      ],
+    };
+
+    beforeEach(() => {
+      // Default: frame creation returns frame-1, then each instance returns its own id
+      mockSendCommand.mockResolvedValue({ name: 'MockNode', id: 'mock-id-1' });
+    });
+
+    it('creates a frame then instances for each component', async () => {
+      mockSendCommand
+        .mockResolvedValueOnce({ name: 'Home Screen', id: 'frame-1' }) // create_frame
+        .mockResolvedValueOnce({ name: 'Nav', id: 'inst-nav' }) // create_component_instance nav
+        .mockResolvedValueOnce({}) // insert_child nav
+        .mockResolvedValueOnce({ name: 'Hero', id: 'inst-hero' }) // create_component_instance hero
+        .mockResolvedValueOnce({}); // insert_child hero
+
+      await callTool('build_screen_from_template', baseArgs);
+
+      expect(mockSendCommand.mock.calls[0][0]).toBe('create_frame');
+      expect(mockSendCommand.mock.calls[1][0]).toBe('create_component_instance');
+      expect(mockSendCommand.mock.calls[2][0]).toBe('insert_child');
+      expect(mockSendCommand.mock.calls[3][0]).toBe('create_component_instance');
+      expect(mockSendCommand.mock.calls[4][0]).toBe('insert_child');
+    });
+
+    it('passes the frame ID as parentId to insert_child calls', async () => {
+      mockSendCommand
+        .mockResolvedValueOnce({ name: 'Home Screen', id: 'frame-abc' })
+        .mockResolvedValueOnce({ name: 'Nav', id: 'inst-1' })
+        .mockResolvedValueOnce({})
+        .mockResolvedValueOnce({ name: 'Hero', id: 'inst-2' })
+        .mockResolvedValueOnce({});
+
+      await callTool('build_screen_from_template', baseArgs);
+
+      expect(mockSendCommand.mock.calls[2][1]).toMatchObject({ parentId: 'frame-abc', childId: 'inst-1' });
+      expect(mockSendCommand.mock.calls[4][1]).toMatchObject({ parentId: 'frame-abc', childId: 'inst-2' });
+    });
+
+    it('passes frame parameters (name, position, size, fill) to create_frame', async () => {
+      mockSendCommand
+        .mockResolvedValueOnce({ name: 'Login', id: 'frame-2' })
+        .mockResolvedValue({ name: 'Node', id: 'inst-x' });
+
+      await callTool('build_screen_from_template', {
+        ...baseArgs,
+        screenName: 'Login',
+        x: 100,
+        y: 200,
+        width: 390,
+        height: 844,
+        fillColor: { r: 0.95, g: 0.95, b: 0.95, a: 1 },
+      });
+
+      expect(mockSendCommand.mock.calls[0][1]).toMatchObject({
+        name: 'Login',
+        x: 100,
+        y: 200,
+        width: 390,
+        height: 844,
+        fillColor: { r: 0.95, g: 0.95, b: 0.95, a: 1 },
+      });
+    });
+
+    it('applies auto-layout when layoutMode is provided', async () => {
+      mockSendCommand
+        .mockResolvedValueOnce({ name: 'Screen', id: 'frame-3' }) // create_frame
+        .mockResolvedValueOnce({}) // set_auto_layout
+        .mockResolvedValue({ name: 'Node', id: 'inst-y' });
+
+      await callTool('build_screen_from_template', {
+        ...baseArgs,
+        layoutMode: 'VERTICAL',
+        paddingTop: 16,
+        itemSpacing: 8,
+      });
+
+      expect(mockSendCommand.mock.calls[1][0]).toBe('set_auto_layout');
+      expect(mockSendCommand.mock.calls[1][1]).toMatchObject({
+        nodeId: 'frame-3',
+        layoutMode: 'VERTICAL',
+        paddingTop: 16,
+        itemSpacing: 8,
+      });
+    });
+
+    it('skips set_auto_layout when layoutMode is omitted', async () => {
+      mockSendCommand
+        .mockResolvedValueOnce({ name: 'Screen', id: 'frame-4' })
+        .mockResolvedValue({ name: 'Node', id: 'inst-z' });
+
+      await callTool('build_screen_from_template', baseArgs);
+
+      const commandNames = mockSendCommand.mock.calls.map((c: any[]) => c[0]);
+      expect(commandNames).not.toContain('set_auto_layout');
+    });
+
+    it('applies componentProperties when provided', async () => {
+      mockSendCommand
+        .mockResolvedValueOnce({ name: 'Screen', id: 'frame-5' })
+        .mockResolvedValueOnce({ name: 'Button', id: 'inst-btn' })
+        .mockResolvedValueOnce({}) // insert_child
+        .mockResolvedValueOnce({}); // set_component_property
+
+      await callTool('build_screen_from_template', {
+        screenName: 'Screen',
+        x: 0, y: 0, width: 375, height: 812,
+        components: [
+          {
+            componentKey: 'key-btn',
+            x: 16,
+            y: 16,
+            componentProperties: { 'Label#1:0': 'Get started' },
+          },
+        ],
+      });
+
+      const setCpCall = mockSendCommand.mock.calls.find((c: any[]) => c[0] === 'set_component_property');
+      expect(setCpCall).toBeDefined();
+      expect(setCpCall![1]).toMatchObject({
+        nodeId: 'inst-btn',
+        properties: { 'Label#1:0': 'Get started' },
+      });
+    });
+
+    it('applies variantProperties when provided', async () => {
+      mockSendCommand
+        .mockResolvedValueOnce({ name: 'Screen', id: 'frame-6' })
+        .mockResolvedValueOnce({ name: 'Button', id: 'inst-btn2' })
+        .mockResolvedValueOnce({}) // insert_child
+        .mockResolvedValueOnce({}); // set_instance_variant
+
+      await callTool('build_screen_from_template', {
+        screenName: 'Screen',
+        x: 0, y: 0, width: 375, height: 812,
+        components: [
+          {
+            componentKey: 'key-btn',
+            x: 0,
+            y: 0,
+            variantProperties: { State: 'Hover' },
+          },
+        ],
+      });
+
+      const setVarCall = mockSendCommand.mock.calls.find((c: any[]) => c[0] === 'set_instance_variant');
+      expect(setVarCall).toBeDefined();
+      expect(setVarCall![1]).toMatchObject({
+        nodeId: 'inst-btn2',
+        properties: { State: 'Hover' },
+      });
+    });
+
+    it('continues and reports per-component failures without aborting', async () => {
+      mockSendCommand
+        .mockResolvedValueOnce({ name: 'Screen', id: 'frame-7' }) // create_frame
+        .mockResolvedValueOnce({ name: 'Nav', id: 'inst-nav2' }) // first component OK
+        .mockResolvedValueOnce({}) // insert_child OK
+        .mockRejectedValueOnce(new Error('component key not found')); // second fails
+
+      const result = await callTool('build_screen_from_template', baseArgs);
+
+      expect(result.content[0].text).toContain('Placed 1 component(s)');
+      expect(result.content[0].text).toContain('Failed to place 1 component(s)');
+      expect(result.content[0].text).toContain('component key not found');
+    });
+
+    it('includes screen name and dimensions in success message', async () => {
+      mockSendCommand
+        .mockResolvedValueOnce({ name: 'Home Screen', id: 'frame-8' })
+        .mockResolvedValue({ name: 'Node', id: 'inst-q' });
+
+      const result = await callTool('build_screen_from_template', baseArgs);
+
+      expect(result.content[0].text).toContain('Home Screen');
+      expect(result.content[0].text).toContain('frame-8');
+      expect(result.content[0].text).toContain('375');
+      expect(result.content[0].text).toContain('812');
+    });
+
+    it('returns an error message when frame creation fails', async () => {
+      mockSendCommand.mockRejectedValueOnce(new Error('canvas is locked'));
+
+      const result = await callTool('build_screen_from_template', baseArgs);
+
+      expect(result.content[0].text).toContain('Error building screen from template');
+      expect(result.content[0].text).toContain('canvas is locked');
+    });
+
+    it('rejects when screenName is missing', async () => {
+      const { schema } = handlers['build_screen_from_template'];
+      expect(() =>
+        schema.parse({ x: 0, y: 0, width: 375, height: 812, components: [] })
+      ).toThrow();
+    });
+
+    it('accepts an empty components array', async () => {
+      mockSendCommand.mockResolvedValueOnce({ name: 'Empty Screen', id: 'frame-9' });
+
+      const result = await callTool('build_screen_from_template', {
+        screenName: 'Empty Screen',
+        x: 0, y: 0, width: 375, height: 812,
+        components: [],
+      });
+
+      expect(mockSendCommand).toHaveBeenCalledTimes(1);
+      expect(mockSendCommand.mock.calls[0][0]).toBe('create_frame');
+      expect(result.content[0].text).toContain('Empty Screen');
+    });
+  });
 });

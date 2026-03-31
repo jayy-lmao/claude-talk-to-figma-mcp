@@ -599,4 +599,312 @@ export function registerCompoundTools(server: McpServer): void {
       }
     }
   );
+
+  // ── Bulk Update Text ──────────────────────────────────────────────────────
+  // Updates text content on multiple nodes in a single call.
+  // This is the primary "content editing" workflow for UX/content designers
+  // who need to update copy across many nodes without rebuilding the design.
+  server.tool(
+    "bulk_update_text",
+    "Update the text content of multiple text nodes in a single operation. Processes all updates and reports per-node success or failure without aborting the batch. Ideal for content design workflows where labels, headings, or copy need to be changed across a screen.",
+    {
+      updates: z
+        .array(
+          z.object({
+            nodeId: z.string().describe("ID of the text node to update"),
+            text: z.string().describe("New text content for this node"),
+          })
+        )
+        .min(1)
+        .describe("Array of text node updates to apply"),
+    },
+    async ({ updates }) => {
+      const succeeded: Array<{ index: number; nodeId: string; text: string }> = [];
+      const failed: Array<{ index: number; nodeId: string; error: string }> = [];
+
+      for (let i = 0; i < updates.length; i++) {
+        const { nodeId, text } = updates[i];
+        try {
+          await sendCommandToFigma("set_text_content", { nodeId, text });
+          succeeded.push({ index: i, nodeId, text });
+        } catch (error) {
+          failed.push({
+            index: i,
+            nodeId,
+            error: error instanceof Error ? error.message : String(error),
+          });
+        }
+      }
+
+      const lines: string[] = [];
+      if (succeeded.length > 0) {
+        lines.push(`Updated ${succeeded.length} text node(s):`);
+        for (const s of succeeded) {
+          const preview = s.text.length > 40 ? s.text.slice(0, 40) + "…" : s.text;
+          lines.push(`  [${s.index}] ${s.nodeId} → "${preview}"`);
+        }
+      }
+      if (failed.length > 0) {
+        lines.push(`Failed to update ${failed.length} node(s):`);
+        for (const f of failed) {
+          lines.push(`  [${f.index}] ${f.nodeId} — ${f.error}`);
+        }
+      }
+
+      return {
+        content: [
+          {
+            type: "text",
+            text: lines.join("\n"),
+          },
+        ],
+      };
+    }
+  );
+
+  // ── Swap Component Variants ───────────────────────────────────────────────
+  // Changes variant properties on multiple component instances in a single call.
+  // Designers frequently need to change states (Default → Hover → Disabled) or
+  // sizes across a whole screen without individually selecting each instance.
+  server.tool(
+    "swap_component_variant",
+    "Change variant properties (state, size, style, etc.) on multiple component instances in a single operation. Processes all swaps and reports per-node success or failure without aborting the batch. Ideal for toggling states like Default → Disabled, or changing sizes across a screen.",
+    {
+      updates: z
+        .array(
+          z.object({
+            nodeId: z.string().describe("ID of the component instance to update"),
+            variantProperties: z
+              .record(z.string())
+              .describe(
+                "Variant properties to set as key→value pairs (e.g. { \"State\": \"Disabled\", \"Size\": \"Large\" })"
+              ),
+          })
+        )
+        .min(1)
+        .describe("Array of variant swap operations to apply"),
+    },
+    async ({ updates }) => {
+      const succeeded: Array<{ index: number; nodeId: string; variantProperties: Record<string, string> }> = [];
+      const failed: Array<{ index: number; nodeId: string; error: string }> = [];
+
+      for (let i = 0; i < updates.length; i++) {
+        const { nodeId, variantProperties } = updates[i];
+        try {
+          await sendCommandToFigma("set_instance_variant", {
+            nodeId,
+            properties: variantProperties,
+          });
+          succeeded.push({ index: i, nodeId, variantProperties });
+        } catch (error) {
+          failed.push({
+            index: i,
+            nodeId,
+            error: error instanceof Error ? error.message : String(error),
+          });
+        }
+      }
+
+      const lines: string[] = [];
+      if (succeeded.length > 0) {
+        lines.push(`Updated variants on ${succeeded.length} instance(s):`);
+        for (const s of succeeded) {
+          lines.push(`  [${s.index}] ${s.nodeId} → ${JSON.stringify(s.variantProperties)}`);
+        }
+      }
+      if (failed.length > 0) {
+        lines.push(`Failed to update ${failed.length} instance(s):`);
+        for (const f of failed) {
+          lines.push(`  [${f.index}] ${f.nodeId} — ${f.error}`);
+        }
+      }
+
+      return {
+        content: [
+          {
+            type: "text",
+            text: lines.join("\n"),
+          },
+        ],
+      };
+    }
+  );
+
+  // ── Build Screen from Template ────────────────────────────────────────────
+  // Creates a screen frame (artboard) and populates it with component instances
+  // in one compound call. This is the "build a screen top-down" designer workflow:
+  // drop a nav bar, hero, cards, and footer all at once from a design system.
+  // Both local and remote library components are supported — pass the key from
+  // get_all_components regardless of source.
+  server.tool(
+    "build_screen_from_template",
+    "Create a screen frame (artboard) and populate it with component instances in a single operation. Both local and remote library components are supported — use keys from get_all_components. This is the primary 'build a screen' workflow for designers: define the artboard, then list the components to place inside it with their positions, variant states, and text overrides.",
+    {
+      screenName: z.string().describe("Name for the screen frame / artboard"),
+      x: z.number().describe("X position of the screen frame on the canvas"),
+      y: z.number().describe("Y position of the screen frame on the canvas"),
+      width: z.number().describe("Width of the screen frame"),
+      height: z.number().describe("Height of the screen frame"),
+      fillColor: z
+        .object({
+          r: z.number().min(0).max(1),
+          g: z.number().min(0).max(1),
+          b: z.number().min(0).max(1),
+          a: z.number().min(0).max(1).optional(),
+        })
+        .optional()
+        .describe("Background fill color for the screen frame (default: white)"),
+      layoutMode: z
+        .enum(["HORIZONTAL", "VERTICAL", "NONE"])
+        .optional()
+        .describe("Auto-layout direction for the frame. Omit for free-form placement."),
+      paddingTop: z.number().optional().describe("Top padding (requires layoutMode)"),
+      paddingBottom: z.number().optional().describe("Bottom padding (requires layoutMode)"),
+      paddingLeft: z.number().optional().describe("Left padding (requires layoutMode)"),
+      paddingRight: z.number().optional().describe("Right padding (requires layoutMode)"),
+      itemSpacing: z.number().optional().describe("Spacing between items (requires layoutMode)"),
+      components: z
+        .array(
+          z.object({
+            componentKey: z
+              .string()
+              .describe("Key of the component to place (from get_all_components, supports local and remote)"),
+            x: z.number().describe("X position relative to the screen frame"),
+            y: z.number().describe("Y position relative to the screen frame"),
+            name: z.string().optional().describe("Optional name override for the instance"),
+            componentProperties: z
+              .record(z.union([z.string(), z.boolean()]))
+              .optional()
+              .describe("Component property overrides (e.g. text or boolean inputs)"),
+            variantProperties: z
+              .record(z.string())
+              .optional()
+              .describe("Variant properties to set (e.g. { \"State\": \"Hover\" })"),
+          })
+        )
+        .describe("List of components to place inside the screen frame"),
+    },
+    async ({
+      screenName, x, y, width, height, fillColor, layoutMode,
+      paddingTop, paddingBottom, paddingLeft, paddingRight, itemSpacing,
+      components,
+    }) => {
+      try {
+        // Step 1: create the screen frame
+        const frameResult = await sendCommandToFigma("create_frame", {
+          x,
+          y,
+          width,
+          height,
+          name: screenName,
+          fillColor: fillColor || { r: 1, g: 1, b: 1, a: 1 },
+        });
+        const typedFrame = frameResult as { id: string; name: string };
+        const frameId = typedFrame.id;
+
+        // Step 2: optionally apply auto-layout to the frame
+        if (layoutMode && layoutMode !== "NONE") {
+          await sendCommandToFigma("set_auto_layout", {
+            nodeId: frameId,
+            layoutMode,
+            paddingTop,
+            paddingBottom,
+            paddingLeft,
+            paddingRight,
+            itemSpacing,
+          });
+        }
+
+        // Step 3: place each component instance inside the frame
+        const placed: Array<{ index: number; componentKey: string; name: string; id: string }> = [];
+        const failed: Array<{ index: number; componentKey: string; error: string }> = [];
+
+        for (let i = 0; i < components.length; i++) {
+          const spec = components[i];
+          try {
+            // Create the instance (works for both local and remote component keys)
+            const instanceResult = await sendCommandToFigma("create_component_instance", {
+              componentKey: spec.componentKey,
+              x: spec.x,
+              y: spec.y,
+            });
+            const typedInstance = instanceResult as { id: string; name: string };
+            const instanceId = typedInstance.id;
+
+            // Move the instance into the screen frame
+            await sendCommandToFigma("insert_child", {
+              parentId: frameId,
+              childId: instanceId,
+            });
+
+            // Apply component property overrides (text, boolean inputs)
+            if (spec.componentProperties && Object.keys(spec.componentProperties).length > 0) {
+              await sendCommandToFigma("set_component_property", {
+                nodeId: instanceId,
+                properties: spec.componentProperties,
+              });
+            }
+
+            // Apply variant properties (State, Size, etc.)
+            if (spec.variantProperties && Object.keys(spec.variantProperties).length > 0) {
+              await sendCommandToFigma("set_instance_variant", {
+                nodeId: instanceId,
+                properties: spec.variantProperties,
+              });
+            }
+
+            placed.push({
+              index: i,
+              componentKey: spec.componentKey,
+              name: spec.name || typedInstance.name,
+              id: instanceId,
+            });
+          } catch (error) {
+            failed.push({
+              index: i,
+              componentKey: spec.componentKey,
+              error: error instanceof Error ? error.message : String(error),
+            });
+          }
+        }
+
+        const lines: string[] = [
+          `Created screen "${typedFrame.name}" (ID: ${frameId}) at (${x}, ${y}) — ${width}×${height}`,
+        ];
+        if (layoutMode && layoutMode !== "NONE") {
+          lines.push(`Auto-layout: ${layoutMode}`);
+        }
+        if (placed.length > 0) {
+          lines.push(`\nPlaced ${placed.length} component(s):`);
+          for (const p of placed) {
+            lines.push(`  [${p.index}] "${p.name}" — ID: ${p.id}`);
+          }
+        }
+        if (failed.length > 0) {
+          lines.push(`\nFailed to place ${failed.length} component(s):`);
+          for (const f of failed) {
+            lines.push(`  [${f.index}] ${f.componentKey} — ${f.error}`);
+          }
+        }
+
+        return {
+          content: [
+            {
+              type: "text",
+              text: lines.join("\n"),
+            },
+          ],
+        };
+      } catch (error) {
+        return {
+          content: [
+            {
+              type: "text",
+              text: `Error building screen from template: ${error instanceof Error ? error.message : String(error)}`,
+            },
+          ],
+        };
+      }
+    }
+  );
 }
