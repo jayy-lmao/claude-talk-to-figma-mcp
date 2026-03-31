@@ -407,4 +407,196 @@ export function registerCompoundTools(server: McpServer): void {
       };
     }
   );
+
+  // ── Get All Components ────────────────────────────────────────────────────
+  // Combines get_local_components + get_remote_components into a single call
+  // so the LLM can discover the full component catalogue before placing instances.
+  server.tool(
+    "get_all_components",
+    "List all components available in the Figma document — both local components defined in this file and remote library components currently used. Returns name, key, and source for every component. Use the key with create_instance_with_properties to place instances.",
+    {
+      filter: z
+        .string()
+        .optional()
+        .describe("Optional case-insensitive substring to filter component names (e.g. 'button', 'icon')"),
+      includeRemote: z
+        .boolean()
+        .optional()
+        .describe("Whether to include remote library components (default: true)"),
+    },
+    async ({ filter, includeRemote = true }) => {
+      try {
+        // Fetch local components
+        const localResult = await sendCommandToFigma("get_local_components");
+        const typedLocal = localResult as {
+          count: number;
+          components: Array<{ id: string; name: string; key: string | null }>;
+        };
+
+        // Optionally fetch remote components
+        interface RemoteComponent {
+          key: string;
+          name: string;
+          description: string;
+          libraryName: string;
+          componentId: string;
+        }
+        let remoteComponents: RemoteComponent[] = [];
+        if (includeRemote) {
+          try {
+            const remoteResult = await sendCommandToFigma("get_remote_components");
+            const typedRemote = remoteResult as { components: RemoteComponent[] };
+            remoteComponents = typedRemote.components ?? [];
+          } catch {
+            // Remote components are best-effort; local ones are always available
+            remoteComponents = [];
+          }
+        }
+
+        // Merge and optionally filter
+        const lowerFilter = filter?.toLowerCase();
+
+        const localEntries = typedLocal.components
+          .filter((c) => !lowerFilter || c.name.toLowerCase().includes(lowerFilter))
+          .map((c) => ({ source: "local" as const, name: c.name, key: c.key ?? "", id: c.id, libraryName: undefined as string | undefined }));
+
+        const remoteEntries = remoteComponents
+          .filter((c) => !lowerFilter || c.name.toLowerCase().includes(lowerFilter))
+          .map((c) => ({ source: "remote" as const, name: c.name, key: c.key, id: c.componentId, libraryName: c.libraryName || undefined }));
+
+        const all = [...localEntries, ...remoteEntries];
+
+        if (all.length === 0) {
+          return {
+            content: [
+              {
+                type: "text",
+                text: filter
+                  ? `No components found matching "${filter}".`
+                  : "No components found in this document.",
+              },
+            ],
+          };
+        }
+
+        const lines: string[] = [`Found ${all.length} component(s)${filter ? ` matching "${filter}"` : ""}:\n`];
+        for (const c of all) {
+          const lib = c.libraryName ? ` [${c.libraryName}]` : "";
+          lines.push(`• ${c.name}${lib}`);
+          lines.push(`  key: ${c.key || "(no key)"}  source: ${c.source}`);
+        }
+
+        return {
+          content: [
+            {
+              type: "text",
+              text: lines.join("\n"),
+            },
+          ],
+        };
+      } catch (error) {
+        return {
+          content: [
+            {
+              type: "text",
+              text: `Error listing components: ${error instanceof Error ? error.message : String(error)}`,
+            },
+          ],
+        };
+      }
+    }
+  );
+
+  // ── Create Instance with Properties ──────────────────────────────────────
+  // Combines create_component_instance + set_component_property + set_instance_variant
+  // into a single call. This is the most common component workflow: place an
+  // instance and immediately configure its inputs (text, boolean, variant).
+  server.tool(
+    "create_instance_with_properties",
+    "Place a component instance in Figma and immediately configure its properties and/or variant in a single operation. Combines create_component_instance, set_component_property, and set_instance_variant. Use get_all_components to find component keys.",
+    {
+      componentKey: z
+        .string()
+        .describe("Key of the component to instantiate (from get_all_components)"),
+      x: z.number().describe("X position (local coordinates, relative to parent)"),
+      y: z.number().describe("Y position (local coordinates, relative to parent)"),
+      parentId: z
+        .string()
+        .optional()
+        .describe("Optional parent node ID to place the instance inside"),
+      componentProperties: z
+        .record(z.union([z.string(), z.boolean()]))
+        .optional()
+        .describe(
+          "Component property overrides as key→value pairs (e.g. { \"Label#1234:0\": \"Sign up\", \"Show Icon#1234:1\": true }). Keys come from get_component_properties."
+        ),
+      variantProperties: z
+        .record(z.string())
+        .optional()
+        .describe(
+          "Variant properties to set as key→value pairs (e.g. { \"State\": \"Hover\", \"Size\": \"Large\" })"
+        ),
+    },
+    async ({ componentKey, x, y, parentId, componentProperties, variantProperties }) => {
+      try {
+        // Step 1: create the instance
+        const instanceResult = await sendCommandToFigma("create_component_instance", {
+          componentKey,
+          x,
+          y,
+        });
+        const typedInstance = instanceResult as { id: string; name: string; [key: string]: unknown };
+        const instanceId = typedInstance.id;
+
+        // Step 2: move into parent if requested
+        if (parentId) {
+          await sendCommandToFigma("insert_child", {
+            parentId,
+            childId: instanceId,
+          });
+        }
+
+        const applied: string[] = [];
+
+        // Step 3: apply component property overrides (text, boolean, instance swap)
+        if (componentProperties && Object.keys(componentProperties).length > 0) {
+          await sendCommandToFigma("set_component_property", {
+            nodeId: instanceId,
+            properties: componentProperties,
+          });
+          applied.push(`componentProperties: ${JSON.stringify(componentProperties)}`);
+        }
+
+        // Step 4: apply variant properties
+        if (variantProperties && Object.keys(variantProperties).length > 0) {
+          await sendCommandToFigma("set_instance_variant", {
+            nodeId: instanceId,
+            properties: variantProperties,
+          });
+          applied.push(`variantProperties: ${JSON.stringify(variantProperties)}`);
+        }
+
+        const propertySummary =
+          applied.length > 0 ? `\nApplied: ${applied.join("; ")}` : "";
+
+        return {
+          content: [
+            {
+              type: "text",
+              text: `Created instance "${typedInstance.name}" with ID: ${instanceId} at (${x}, ${y}).${propertySummary}`,
+            },
+          ],
+        };
+      } catch (error) {
+        return {
+          content: [
+            {
+              type: "text",
+              text: `Error creating instance with properties: ${error instanceof Error ? error.message : String(error)}`,
+            },
+          ],
+        };
+      }
+    }
+  );
 }

@@ -485,4 +485,267 @@ describe('compound tools', () => {
       expect(result.content[0].text).toContain('[1]');
     });
   });
+
+  // ── get_all_components ───────────────────────────────────────────────────
+
+  describe('get_all_components tool', () => {
+    const localResponse = {
+      count: 2,
+      components: [
+        { id: 'l-1', name: 'Button/Primary', key: 'key-btn-primary' },
+        { id: 'l-2', name: 'Icon/Arrow', key: 'key-icon-arrow' },
+      ],
+    };
+    const remoteResponse = {
+      success: true,
+      count: 1,
+      components: [
+        { key: 'r-key-1', name: 'Card/Default', description: '', libraryName: 'Design System', componentId: 'r-cmp-1' },
+      ],
+    };
+
+    it('calls get_local_components and get_remote_components', async () => {
+      mockSendCommand
+        .mockResolvedValueOnce(localResponse)
+        .mockResolvedValueOnce(remoteResponse);
+
+      await callTool('get_all_components', {});
+
+      expect(mockSendCommand).toHaveBeenCalledTimes(2);
+      expect(mockSendCommand.mock.calls[0][0]).toBe('get_local_components');
+      expect(mockSendCommand.mock.calls[1][0]).toBe('get_remote_components');
+    });
+
+    it('returns combined list with source labels', async () => {
+      mockSendCommand
+        .mockResolvedValueOnce(localResponse)
+        .mockResolvedValueOnce(remoteResponse);
+
+      const result = await callTool('get_all_components', {});
+      const text = result.content[0].text;
+
+      expect(text).toContain('Button/Primary');
+      expect(text).toContain('key-btn-primary');
+      expect(text).toContain('source: local');
+      expect(text).toContain('Card/Default');
+      expect(text).toContain('r-key-1');
+      expect(text).toContain('source: remote');
+      expect(text).toContain('Design System');
+    });
+
+    it('reports total count in the header', async () => {
+      mockSendCommand
+        .mockResolvedValueOnce(localResponse)
+        .mockResolvedValueOnce(remoteResponse);
+
+      const result = await callTool('get_all_components', {});
+      expect(result.content[0].text).toContain('3 component(s)');
+    });
+
+    it('filters by name substring (case-insensitive)', async () => {
+      mockSendCommand
+        .mockResolvedValueOnce(localResponse)
+        .mockResolvedValueOnce(remoteResponse);
+
+      const result = await callTool('get_all_components', { filter: 'button' });
+      const text = result.content[0].text;
+
+      expect(text).toContain('Button/Primary');
+      expect(text).not.toContain('Icon/Arrow');
+      expect(text).not.toContain('Card/Default');
+    });
+
+    it('skips remote fetch when includeRemote is false', async () => {
+      mockSendCommand.mockResolvedValueOnce(localResponse);
+
+      const result = await callTool('get_all_components', { includeRemote: false });
+
+      expect(mockSendCommand).toHaveBeenCalledTimes(1);
+      expect(mockSendCommand.mock.calls[0][0]).toBe('get_local_components');
+      expect(result.content[0].text).not.toContain('remote');
+    });
+
+    it('returns a "not found" message when filter matches nothing', async () => {
+      mockSendCommand
+        .mockResolvedValueOnce(localResponse)
+        .mockResolvedValueOnce(remoteResponse);
+
+      const result = await callTool('get_all_components', { filter: 'zzz-no-match' });
+      expect(result.content[0].text).toContain('No components found matching');
+    });
+
+    it('returns a message when there are no components', async () => {
+      mockSendCommand
+        .mockResolvedValueOnce({ count: 0, components: [] })
+        .mockResolvedValueOnce({ success: true, count: 0, components: [] });
+
+      const result = await callTool('get_all_components', {});
+      expect(result.content[0].text).toContain('No components found');
+    });
+
+    it('still succeeds if the remote call fails (best-effort)', async () => {
+      mockSendCommand
+        .mockResolvedValueOnce(localResponse)
+        .mockRejectedValueOnce(new Error('remote unavailable'));
+
+      const result = await callTool('get_all_components', {});
+      // Should still list local components without error
+      expect(result.content[0].text).toContain('Button/Primary');
+      expect(result.content[0].text).not.toContain('Error');
+    });
+
+    it('returns an error message when get_local_components fails', async () => {
+      mockSendCommand.mockRejectedValueOnce(new Error('Network timeout'));
+
+      const result = await callTool('get_all_components', {});
+      expect(result.content[0].text).toContain('Error listing components');
+      expect(result.content[0].text).toContain('Network timeout');
+    });
+  });
+
+  // ── create_instance_with_properties ──────────────────────────────────────
+
+  describe('create_instance_with_properties tool', () => {
+    it('creates an instance at the specified position', async () => {
+      mockSendCommand.mockResolvedValueOnce({ name: 'Button Instance', id: 'inst-1' });
+
+      const result = await callTool('create_instance_with_properties', {
+        componentKey: 'key-btn',
+        x: 100,
+        y: 200,
+      });
+
+      expect(mockSendCommand).toHaveBeenCalledTimes(1);
+      expect(mockSendCommand.mock.calls[0][0]).toBe('create_component_instance');
+      expect(mockSendCommand.mock.calls[0][1]).toMatchObject({
+        componentKey: 'key-btn',
+        x: 100,
+        y: 200,
+      });
+      expect(result.content[0].text).toContain('inst-1');
+    });
+
+    it('applies component properties after creating the instance', async () => {
+      mockSendCommand.mockResolvedValueOnce({ name: 'Button', id: 'inst-2' });
+
+      await callTool('create_instance_with_properties', {
+        componentKey: 'key-btn',
+        x: 0,
+        y: 0,
+        componentProperties: { 'Label#1234:0': 'Sign up', 'Show Icon#1234:1': true },
+      });
+
+      expect(mockSendCommand).toHaveBeenCalledTimes(2);
+      expect(mockSendCommand.mock.calls[1][0]).toBe('set_component_property');
+      expect(mockSendCommand.mock.calls[1][1]).toMatchObject({
+        nodeId: 'inst-2',
+        properties: { 'Label#1234:0': 'Sign up', 'Show Icon#1234:1': true },
+      });
+    });
+
+    it('applies variant properties after creating the instance', async () => {
+      mockSendCommand.mockResolvedValueOnce({ name: 'Button', id: 'inst-3' });
+
+      await callTool('create_instance_with_properties', {
+        componentKey: 'key-btn',
+        x: 0,
+        y: 0,
+        variantProperties: { State: 'Hover', Size: 'Large' },
+      });
+
+      expect(mockSendCommand).toHaveBeenCalledTimes(2);
+      expect(mockSendCommand.mock.calls[1][0]).toBe('set_instance_variant');
+      expect(mockSendCommand.mock.calls[1][1]).toMatchObject({
+        nodeId: 'inst-3',
+        properties: { State: 'Hover', Size: 'Large' },
+      });
+    });
+
+    it('applies both component and variant properties when both are provided', async () => {
+      mockSendCommand.mockResolvedValueOnce({ name: 'Button', id: 'inst-4' });
+
+      await callTool('create_instance_with_properties', {
+        componentKey: 'key-btn',
+        x: 0,
+        y: 0,
+        componentProperties: { 'Label#1234:0': 'Get started' },
+        variantProperties: { State: 'Default' },
+      });
+
+      expect(mockSendCommand).toHaveBeenCalledTimes(3);
+      expect(mockSendCommand.mock.calls[1][0]).toBe('set_component_property');
+      expect(mockSendCommand.mock.calls[2][0]).toBe('set_instance_variant');
+    });
+
+    it('inserts into parent when parentId is provided', async () => {
+      mockSendCommand.mockResolvedValueOnce({ name: 'Button', id: 'inst-5' });
+
+      await callTool('create_instance_with_properties', {
+        componentKey: 'key-btn',
+        x: 0,
+        y: 0,
+        parentId: 'container-xyz',
+      });
+
+      // create_component_instance + insert_child
+      expect(mockSendCommand).toHaveBeenCalledTimes(2);
+      expect(mockSendCommand.mock.calls[1][0]).toBe('insert_child');
+      expect(mockSendCommand.mock.calls[1][1]).toMatchObject({
+        parentId: 'container-xyz',
+        childId: 'inst-5',
+      });
+    });
+
+    it('does not call set_component_property when componentProperties is empty', async () => {
+      mockSendCommand.mockResolvedValueOnce({ name: 'Button', id: 'inst-6' });
+
+      await callTool('create_instance_with_properties', {
+        componentKey: 'key-btn',
+        x: 0,
+        y: 0,
+        componentProperties: {},
+      });
+
+      expect(mockSendCommand).toHaveBeenCalledTimes(1);
+      expect(mockSendCommand.mock.calls[0][0]).toBe('create_component_instance');
+    });
+
+    it('includes applied properties in the success message', async () => {
+      mockSendCommand.mockResolvedValueOnce({ name: 'Card', id: 'inst-7' });
+
+      const result = await callTool('create_instance_with_properties', {
+        componentKey: 'key-card',
+        x: 50,
+        y: 50,
+        variantProperties: { Size: 'Small' },
+      });
+
+      expect(result.content[0].text).toContain('inst-7');
+      expect(result.content[0].text).toContain('variantProperties');
+      expect(result.content[0].text).toContain('Small');
+    });
+
+    it('returns an error message when instance creation fails', async () => {
+      mockSendCommand.mockRejectedValueOnce(new Error('Component key not found'));
+
+      const result = await callTool('create_instance_with_properties', {
+        componentKey: 'bad-key',
+        x: 0,
+        y: 0,
+      });
+
+      expect(result.content[0].text).toContain('Error creating instance with properties');
+      expect(result.content[0].text).toContain('Component key not found');
+    });
+
+    it('rejects missing componentKey', async () => {
+      const { schema } = handlers['create_instance_with_properties'];
+      expect(() => schema.parse({ x: 0, y: 0 })).toThrow();
+    });
+
+    it('rejects missing x', async () => {
+      const { schema } = handlers['create_instance_with_properties'];
+      expect(() => schema.parse({ componentKey: 'k', y: 0 })).toThrow();
+    });
+  });
 });
