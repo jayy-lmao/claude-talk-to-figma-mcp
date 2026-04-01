@@ -360,6 +360,8 @@ async function handleCommand(command, params) {
     // ── Search commands ──────────────────────────────────────────────────
     case "find_nodes":
       return await findNodes(params);
+    case "find_text_in_subtree":
+      return await findTextInSubtree(params);
     case "replace_node_with_instance":
       return await replaceNodeWithInstance(params);
     default:
@@ -1159,7 +1161,7 @@ async function getLocalComponents() {
 // }
 
 async function createComponentInstance(params) {
-  const { componentKey, x = 0, y = 0 } = params || {};
+  const { componentKey, x = 0, y = 0, parentId } = params || {};
 
   if (!componentKey) {
     throw new Error("Missing componentKey parameter");
@@ -1244,9 +1246,30 @@ async function createComponentInstance(params) {
       instance.x = x;
       instance.y = y;
 
-      figma.currentPage.appendChild(instance);
+      // Append to parent if specified, otherwise to current page
+      if (parentId) {
+        const parent = await figma.getNodeByIdAsync(parentId);
+        if (parent && "appendChild" in parent) {
+          parent.appendChild(instance);
+          console.log(`Component instance created and added to parent "${parent.name}" (${parentId})`);
+        } else {
+          figma.currentPage.appendChild(instance);
+          console.warn(`parentId "${parentId}" not found or can't have children, added to page root`);
+        }
+      } else {
+        figma.currentPage.appendChild(instance);
+        console.log(`Component instance created and added to page successfully`);
+      }
 
-      console.log(`Component instance created and added to page successfully`);
+      // Pre-load fonts so the instance renders correctly immediately
+      const loadedFonts = await loadFontsForNode(instance);
+
+      // Collect text slots and component properties for the AI
+      const textSlots = collectTextSlots(instance);
+      const fonts = [...loadedFonts].map(function(k) {
+        const parts = k.split("|");
+        return { family: parts[0], style: parts[1] };
+      });
 
       return {
         id: instance.id,
@@ -1256,6 +1279,10 @@ async function createComponentInstance(params) {
         width: instance.width,
         height: instance.height,
         componentId: instance.componentId,
+        parentId: instance.parent ? instance.parent.id : null,
+        textNodes: textSlots,
+        componentProperties: instance.componentProperties || {},
+        fonts: fonts,
       };
     } catch (instanceError) {
       console.error(`Error creating component instance: ${instanceError.message}`);
@@ -3171,7 +3198,40 @@ async function getStyledTextSegments(params) {
   }
 }
 
-// Load all fonts used by text nodes within a subtree (or a single text node)
+// Collect metadata for all text nodes in a subtree (synchronous, lightweight).
+// Used to surface text slots (labels, placeholders) when creating component instances.
+function collectTextSlots(node, slots) {
+  if (!slots) slots = [];
+  if (node.type === "TEXT") {
+    var fontFamily = "";
+    var fontStyle = "";
+    var fontSize = 0;
+    if (node.fontName && typeof node.fontName === "object" && "family" in node.fontName) {
+      fontFamily = node.fontName.family;
+      fontStyle = node.fontName.style || "";
+    }
+    if (typeof node.fontSize === "number") {
+      fontSize = node.fontSize;
+    }
+    slots.push({
+      id: node.id,
+      name: node.name || "Text",
+      characters: node.characters,
+      fontFamily: fontFamily,
+      fontStyle: fontStyle,
+      fontSize: fontSize,
+    });
+  }
+  if ("children" in node) {
+    for (var i = 0; i < node.children.length; i++) {
+      collectTextSlots(node.children[i], slots);
+    }
+  }
+  return slots;
+}
+
+// Load all fonts used by text nodes within a subtree (or a single text node).
+// Returns the Set of "family|style" strings that were loaded.
 async function loadFontsForNode(node) {
   const fontsToLoad = new Set();
 
@@ -3200,6 +3260,8 @@ async function loadFontsForNode(node) {
     const [family, style] = key.split("|");
     await figma.loadFontAsync({ family, style });
   }
+
+  return fontsToLoad;
 }
 
 async function loadFontAsyncWrapper(params) {
@@ -3265,12 +3327,32 @@ async function getRemoteComponents(params) {
             } catch (e) {
               // mainComponent parent may not be accessible for remote components
             }
+
+            // Scan the first instance for text slots and fonts
+            var textSlots = [];
+            var fontSet = new Set();
+            try {
+              textSlots = collectTextSlots(instance);
+              textSlots.forEach(function(t) {
+                if (t.fontFamily) fontSet.add(t.fontFamily + "|" + t.fontStyle);
+              });
+            } catch (e) {
+              // Non-fatal: text slot discovery is best-effort
+            }
+
             remoteComponents.set(key, {
               key: key,
               name: mainComponent.name || instance.name,
               description: mainComponent.description || "",
               libraryName: libraryName,
-              componentId: mainComponent.id || ""
+              componentId: mainComponent.id || "",
+              editableTextNodes: textSlots.map(function(t) {
+                return { name: t.name, fontFamily: t.fontFamily, fontStyle: t.fontStyle };
+              }),
+              fonts: [...fontSet].map(function(k) {
+                var parts = k.split("|");
+                return { family: parts[0], style: parts[1] };
+              }),
             });
           }
         }
@@ -5954,6 +6036,58 @@ async function getAnnotation(params) {
     id: node.id,
     name: node.name,
     annotations: node.annotations || []
+  };
+}
+
+// Find a text node by name within a node's subtree (used for text overrides on instances)
+async function findTextInSubtree(params) {
+  const { nodeId, name } = params || {};
+  if (!nodeId || !name) {
+    throw new Error("Missing nodeId or name parameter");
+  }
+
+  const root = await figma.getNodeByIdAsync(nodeId);
+  if (!root) {
+    throw new Error(`Node with ID ${nodeId} not found`);
+  }
+
+  const nameLower = name.toLowerCase();
+
+  // Async search to handle lazily-loaded instance children
+  async function search(node) {
+    if (node.type === "TEXT" && node.name.toLowerCase() === nameLower) {
+      return node;
+    }
+    if ("children" in node) {
+      for (const child of node.children) {
+        const found = await search(child);
+        if (found) return found;
+      }
+    }
+    return null;
+  }
+
+  const found = await search(root);
+  if (!found) {
+    // Collect available text node names for diagnostic feedback
+    const textNames = [];
+    async function collectNames(n) {
+      if (n.type === "TEXT") textNames.push(n.name);
+      if ("children" in n) {
+        for (const child of n.children) {
+          await collectNames(child);
+        }
+      }
+    }
+    await collectNames(root);
+    return { found: false, nodeId: null, name: name, availableTextNodes: textNames };
+  }
+
+  return {
+    found: true,
+    nodeId: found.id,
+    name: found.name,
+    characters: found.characters,
   };
 }
 

@@ -442,6 +442,8 @@ export function registerCompoundTools(server: McpServer): void {
           description: string;
           libraryName: string;
           componentId: string;
+          editableTextNodes?: Array<{ name: string; fontFamily: string; fontStyle: string }>;
+          fonts?: Array<{ family: string; style: string }>;
         }
         let remoteComponents: RemoteComponent[] = [];
         if (includeRemote) {
@@ -464,7 +466,15 @@ export function registerCompoundTools(server: McpServer): void {
 
         const remoteEntries = remoteComponents
           .filter((c) => !lowerFilter || c.name.toLowerCase().includes(lowerFilter))
-          .map((c) => ({ source: "remote" as const, name: c.name, key: c.key, id: c.componentId, libraryName: c.libraryName || undefined }));
+          .map((c) => ({
+            source: "remote" as const,
+            name: c.name,
+            key: c.key,
+            id: c.componentId,
+            libraryName: c.libraryName || undefined,
+            fonts: c.fonts || undefined,
+            editableTextNodes: c.editableTextNodes || undefined,
+          }));
 
         const all = [...localEntries, ...remoteEntries];
 
@@ -486,6 +496,12 @@ export function registerCompoundTools(server: McpServer): void {
           const lib = c.libraryName ? ` [${c.libraryName}]` : "";
           lines.push(`• ${c.name}${lib}`);
           lines.push(`  key: ${c.key || "(no key)"}  source: ${c.source}`);
+          if ("fonts" in c && c.fonts && c.fonts.length > 0) {
+            lines.push(`  fonts: ${c.fonts.map((f: { family: string; style: string }) => `${f.family} ${f.style}`).join(", ")}`);
+          }
+          if ("editableTextNodes" in c && c.editableTextNodes && c.editableTextNodes.length > 0) {
+            lines.push(`  text slots: ${c.editableTextNodes.map((t: { name: string }) => t.name).join(", ")}`);
+          }
         }
 
         return {
@@ -580,9 +596,26 @@ export function registerCompoundTools(server: McpServer): void {
         .describe(
           "Variant properties to set as key→value pairs (e.g. { \"State\": \"Hover\", \"Size\": \"Large\" })"
         ),
+      textOverrides: z
+        .array(
+          z.object({
+            nodeName: z.string().describe("Name of the nested text node to update (case-insensitive match). Use names from create_component_instance response textNodes or get_all_components text slots."),
+            text: z.string().describe("New text content for this node"),
+          })
+        )
+        .optional()
+        .describe("Text content overrides for nested text nodes within the instance (e.g. setting labels and placeholders on a text-field component)"),
+      layoutSizingHorizontal: z
+        .enum(["FIXED", "HUG", "FILL"])
+        .optional()
+        .describe("Horizontal layout sizing for this instance (FILL to stretch in an auto-layout parent)"),
+      layoutSizingVertical: z
+        .enum(["FIXED", "HUG", "FILL"])
+        .optional()
+        .describe("Vertical layout sizing for this instance (HUG to shrink-wrap content)"),
       channel: z.string().optional().describe("Target channel to send the command to (uses active channel if omitted)"),
     },
-    async ({ componentKey, x, y, parentId, componentProperties, variantProperties, channel }) => {
+    async ({ componentKey, x, y, parentId, componentProperties, variantProperties, textOverrides, layoutSizingHorizontal, layoutSizingVertical, channel }) => {
       try {
         // Step 1: create the instance
         const instanceResult = await sendCommandToFigma("create_component_instance", {
@@ -619,6 +652,45 @@ export function registerCompoundTools(server: McpServer): void {
             properties: variantProperties,
           }, { channel });
           applied.push(`variantProperties: ${JSON.stringify(variantProperties)}`);
+        }
+
+        // Step 5: apply text overrides on nested text nodes
+        if (textOverrides && textOverrides.length > 0) {
+          const overrideResults: string[] = [];
+          for (const override of textOverrides) {
+            try {
+              const findResult = await sendCommandToFigma("find_text_in_subtree", {
+                nodeId: instanceId,
+                name: override.nodeName,
+              }, { channel }) as { found: boolean; nodeId: string | null };
+
+              if (findResult.found && findResult.nodeId) {
+                await sendCommandToFigma("set_text_content", {
+                  nodeId: findResult.nodeId,
+                  text: override.text,
+                }, { channel });
+                overrideResults.push(`"${override.nodeName}" → "${override.text}"`);
+              }
+            } catch {
+              // Text override failures are non-fatal
+            }
+          }
+          if (overrideResults.length > 0) {
+            applied.push(`textOverrides: ${overrideResults.join(", ")}`);
+          }
+        }
+
+        // Step 6: apply layout sizing
+        if (layoutSizingHorizontal !== undefined || layoutSizingVertical !== undefined) {
+          await sendCommandToFigma("set_node_properties", {
+            nodeId: instanceId,
+            layoutSizingHorizontal,
+            layoutSizingVertical,
+          }, { channel });
+          const sizingParts: string[] = [];
+          if (layoutSizingHorizontal) sizingParts.push(`H:${layoutSizingHorizontal}`);
+          if (layoutSizingVertical) sizingParts.push(`V:${layoutSizingVertical}`);
+          applied.push(`layoutSizing: ${sizingParts.join(", ")}`);
         }
 
         const propertySummary =
@@ -827,6 +899,25 @@ export function registerCompoundTools(server: McpServer): void {
               .record(z.string())
               .optional()
               .describe("Variant properties to set (e.g. { \"State\": \"Hover\" })"),
+            width: z.number().optional().describe("Resize instance to this width after placement"),
+            height: z.number().optional().describe("Resize instance to this height after placement"),
+            textOverrides: z
+              .array(
+                z.object({
+                  nodeName: z.string().describe("Name of the nested text node to update (e.g. 'text-label', 'Placeholder Text'). Matched by recursive name search within the instance."),
+                  text: z.string().describe("New text content for this node"),
+                })
+              )
+              .optional()
+              .describe("Text content overrides for nested text nodes within the instance (e.g. setting labels and placeholders on a text-field component)"),
+            layoutSizingHorizontal: z
+              .enum(["FIXED", "HUG", "FILL"])
+              .optional()
+              .describe("Horizontal layout sizing for this instance (FILL to stretch in the auto-layout screen frame)"),
+            layoutSizingVertical: z
+              .enum(["FIXED", "HUG", "FILL"])
+              .optional()
+              .describe("Vertical layout sizing for this instance"),
           })
         )
         .describe("List of components to place inside the screen frame"),
@@ -868,20 +959,15 @@ export function registerCompoundTools(server: McpServer): void {
         for (let i = 0; i < components.length; i++) {
           const spec = components[i];
           try {
-            // Create the instance (works for both local and remote component keys)
+            // Create the instance directly inside the screen frame
             const instanceResult = await sendCommandToFigma("create_component_instance", {
               componentKey: spec.componentKey,
               x: spec.x,
               y: spec.y,
-            }, { channel });
-            const typedInstance = instanceResult as { id: string; name: string };
-            const instanceId = typedInstance.id;
-
-            // Move the instance into the screen frame
-            await sendCommandToFigma("insert_child", {
               parentId: frameId,
-              childId: instanceId,
             }, { channel });
+            const typedInstance = instanceResult as { id: string; name: string; width?: number; height?: number };
+            const instanceId = typedInstance.id;
 
             // Apply component property overrides (text, boolean inputs)
             if (spec.componentProperties && Object.keys(spec.componentProperties).length > 0) {
@@ -896,6 +982,49 @@ export function registerCompoundTools(server: McpServer): void {
               await sendCommandToFigma("set_instance_variant", {
                 nodeId: instanceId,
                 properties: spec.variantProperties,
+              }, { channel });
+            }
+
+            // Resize instance if width/height specified
+            if (spec.width !== undefined || spec.height !== undefined) {
+              const w = spec.width ?? typedInstance.width;
+              const h = spec.height ?? typedInstance.height;
+              if (w !== undefined && h !== undefined) {
+                await sendCommandToFigma("resize_node", {
+                  nodeId: instanceId,
+                  width: w,
+                  height: h,
+                }, { channel });
+              }
+            }
+
+            // Apply text overrides on nested text nodes within the instance
+            if (spec.textOverrides && spec.textOverrides.length > 0) {
+              for (const override of spec.textOverrides) {
+                try {
+                  const findResult = await sendCommandToFigma("find_text_in_subtree", {
+                    nodeId: instanceId,
+                    name: override.nodeName,
+                  }, { channel }) as { found: boolean; nodeId: string | null };
+
+                  if (findResult.found && findResult.nodeId) {
+                    await sendCommandToFigma("set_text_content", {
+                      nodeId: findResult.nodeId,
+                      text: override.text,
+                    }, { channel });
+                  }
+                } catch {
+                  // Text override failures are non-fatal
+                }
+              }
+            }
+
+            // Apply layout sizing if specified
+            if (spec.layoutSizingHorizontal !== undefined || spec.layoutSizingVertical !== undefined) {
+              await sendCommandToFigma("set_node_properties", {
+                nodeId: instanceId,
+                layoutSizingHorizontal: spec.layoutSizingHorizontal,
+                layoutSizingVertical: spec.layoutSizingVertical,
               }, { channel });
             }
 

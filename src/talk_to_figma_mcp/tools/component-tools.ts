@@ -27,12 +27,41 @@ export function registerComponentTools(server: McpServer): void {
           y,
           parentId,
         }, { channel });
-        const typedResult = result as any;
+        const typedResult = result as {
+          id: string;
+          name: string;
+          x: number;
+          y: number;
+          width: number;
+          height: number;
+          componentId: string;
+          parentId: string | null;
+          textNodes?: Array<{ id: string; name: string; characters: string; fontFamily: string; fontStyle: string; fontSize: number }>;
+          componentProperties?: Record<string, unknown>;
+          fonts?: Array<{ family: string; style: string }>;
+        };
+
+        const lines: string[] = [
+          `Created instance "${typedResult.name}" (ID: ${typedResult.id}) at (${typedResult.x}, ${typedResult.y}), size ${typedResult.width}x${typedResult.height}`,
+        ];
+        if (typedResult.fonts && typedResult.fonts.length > 0) {
+          lines.push(`Fonts: ${typedResult.fonts.map(f => `${f.family} ${f.style}`).join(", ")}`);
+        }
+        if (typedResult.textNodes && typedResult.textNodes.length > 0) {
+          lines.push(`Text nodes (use these names for textOverrides):`);
+          for (const tn of typedResult.textNodes) {
+            lines.push(`  - "${tn.name}" (ID: ${tn.id}): "${tn.characters}" [${tn.fontFamily} ${tn.fontStyle} ${tn.fontSize}px]`);
+          }
+        }
+        if (typedResult.componentProperties && Object.keys(typedResult.componentProperties).length > 0) {
+          lines.push(`Component properties: ${JSON.stringify(typedResult.componentProperties)}`);
+        }
+
         return {
           content: [
             {
               type: "text",
-              text: JSON.stringify(typedResult),
+              text: lines.join("\n"),
             }
           ]
         }

@@ -147,4 +147,14 @@ export type FigmaCommand =
   | "set_prototype_start_node"
   | "set_text_align"
   | "get_image_bytes"
-  | "find_nodes";
+  | "find_nodes"
+  | "get_available_libraries"
+  | "find_text_in_subtree"
+  | "replace_node_with_instance"
+  | "get_component_set_info"
+  | "bulk_load_fonts"
+  | "bulk_apply_variables"
+  | "bulk_add_reactions"
+  | "fix_fonts"
+  | "rescale_node"
+  | "create_slide";

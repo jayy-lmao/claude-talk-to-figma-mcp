@@ -330,6 +330,19 @@ When a design system is available:
 2. Use build_screen_from_template() to create an artboard and populate it with instances in one call
 3. Use create_instance_with_properties() for placing individual instances with property/variant configuration
 
+### Component Instance Placement
+
+- create_component_instance supports parentId — instances are placed directly inside the target frame
+- Fonts are auto-loaded when instances are created, so library components with custom fonts (e.g. "Rund Text") render correctly
+- After placement in an auto-layout parent, use set_node_properties with layoutSizingHorizontal: "FILL" to stretch instances
+
+### Building Forms with Library Fields
+
+Use build_screen_from_template to place all form field instances at once:
+- Set textOverrides on each component to configure labels, placeholders, and helper text (e.g. \`[{nodeName: "text-label", text: "Email"}, {nodeName: "Placeholder Text", text: "you@example.com"}]\`)
+- Set width/height on each component to resize fields to match the form layout
+- Use get_node_info on a sample instance first to discover the names of nested text nodes
+
 ## Modifying Existing Elements
 
 - Use set_text_content() to modify text content (or bulk_update_text for batch)
@@ -1092,6 +1105,9 @@ build_screen_from_template — Create artboard + populate with component instanc
     name (string, optional)
     componentProperties (Record<string, string|boolean>, optional)
     variantProperties (Record<string, string>, optional)
+    width (number, optional) — Resize instance width after placement
+    height (number, optional) — Resize instance height after placement
+    textOverrides (array, optional) — Each: {nodeName: string, text: string} — Set text on nested nodes by name
 
 ## Search Tools
 
