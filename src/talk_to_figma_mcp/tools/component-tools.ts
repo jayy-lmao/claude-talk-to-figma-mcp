@@ -16,14 +16,15 @@ export function registerComponentTools(server: McpServer): void {
       componentKey: z.string().describe("Key of the component to instantiate"),
       x: z.number().describe("X position (local coordinates, relative to parent)"),
       y: z.number().describe("Y position (local coordinates, relative to parent)"),
+      channel: z.string().optional().describe("Target channel to send the command to (uses active channel if omitted)"),
     },
-    async ({ componentKey, x, y }) => {
+    async ({ componentKey, x, y, channel }) => {
       try {
         const result = await sendCommandToFigma("create_component_instance", {
           componentKey,
           x,
           y,
-        });
+        }, { channel });
         const typedResult = result as any;
         return {
           content: [
@@ -53,13 +54,14 @@ export function registerComponentTools(server: McpServer): void {
     {
       nodeId: z.string().describe("The ID of the node to convert into a component"),
       name: z.string().optional().describe("Optional new name for the component"),
+      channel: z.string().optional().describe("Target channel to send the command to (uses active channel if omitted)"),
     },
-    async ({ nodeId, name }) => {
+    async ({ nodeId, name, channel }) => {
       try {
         const result = await sendCommandToFigma("create_component_from_node", {
           nodeId,
           name,
-        });
+        }, { channel });
         const typedResult = result as { id: string; name: string; key: string };
         return {
           content: [
@@ -89,13 +91,14 @@ export function registerComponentTools(server: McpServer): void {
     {
       componentIds: z.array(z.string()).describe("Array of component node IDs to combine into a component set"),
       name: z.string().optional().describe("Optional name for the component set"),
+      channel: z.string().optional().describe("Target channel to send the command to (uses active channel if omitted)"),
     },
-    async ({ componentIds, name }) => {
+    async ({ componentIds, name, channel }) => {
       try {
         const result = await sendCommandToFigma("create_component_set", {
           componentIds,
           name,
-        });
+        }, { channel });
         const typedResult = result as { id: string; name: string; key: string; variantCount: number };
         return {
           content: [
@@ -127,15 +130,16 @@ export function registerComponentTools(server: McpServer): void {
       propertyName: z.string().describe("Display name for the property (e.g., 'Button Label', 'Show Icon')"),
       type: z.enum(["TEXT", "BOOLEAN", "INSTANCE_SWAP", "VARIANT"]).describe("The type of component property"),
       defaultValue: z.union([z.string(), z.boolean()]).optional().describe("Default value for the property. String for TEXT/VARIANT/INSTANCE_SWAP, boolean for BOOLEAN."),
+      channel: z.string().optional().describe("Target channel to send the command to (uses active channel if omitted)"),
     },
-    async ({ nodeId, propertyName, type, defaultValue }) => {
+    async ({ nodeId, propertyName, type, defaultValue, channel }) => {
       try {
         const result = await sendCommandToFigma("add_component_property", {
           nodeId,
           propertyName,
           type,
           defaultValue,
-        });
+        }, { channel });
         const typedResult = result as any;
         return {
           content: [
@@ -164,12 +168,13 @@ export function registerComponentTools(server: McpServer): void {
     "Get the component property definitions from a component, or the current property values from an instance. Useful for inspecting what properties are available before setting them.",
     {
       nodeId: z.string().describe("The ID of the component or instance node"),
+      channel: z.string().optional().describe("Target channel to send the command to (uses active channel if omitted)"),
     },
-    async ({ nodeId }) => {
+    async ({ nodeId, channel }) => {
       try {
         const result = await sendCommandToFigma("get_component_properties", {
           nodeId,
-        });
+        }, { channel });
         const typedResult = result as any;
         return {
           content: [
@@ -199,13 +204,14 @@ export function registerComponentTools(server: McpServer): void {
     {
       nodeId: z.string().describe("The ID of the instance node"),
       properties: z.record(z.union([z.string(), z.boolean()])).describe("Object mapping property keys to new values. Keys come from get_component_properties (e.g., 'ClientName#1234:0')."),
+      channel: z.string().optional().describe("Target channel to send the command to (uses active channel if omitted)"),
     },
-    async ({ nodeId, properties }) => {
+    async ({ nodeId, properties, channel }) => {
       try {
         const result = await sendCommandToFigma("set_component_property", {
           nodeId,
           properties,
-        });
+        }, { channel });
         const typedResult = result as any;
         return {
           content: [
@@ -236,14 +242,15 @@ export function registerComponentTools(server: McpServer): void {
       nodeId: z.string().describe("The ID of the component node"),
       textNodeId: z.string().describe("The ID of the child text node to link"),
       propertyKey: z.string().describe("The property key returned by add_component_property (e.g., 'ClientName#1234:0')"),
+      channel: z.string().optional().describe("Target channel to send the command to (uses active channel if omitted)"),
     },
-    async ({ nodeId, textNodeId, propertyKey }) => {
+    async ({ nodeId, textNodeId, propertyKey, channel }) => {
       try {
         const result = await sendCommandToFigma("link_component_property", {
           nodeId,
           textNodeId,
           propertyKey,
-        });
+        }, { channel });
         const typedResult = result as any;
         return {
           content: [
@@ -273,13 +280,14 @@ export function registerComponentTools(server: McpServer): void {
     {
       nodeId: z.string().describe("The ID of the instance node to modify"),
       properties: z.record(z.string()).describe("Variant properties to set as key-value pairs (e.g., { \"State\": \"Hover\", \"Size\": \"Large\" })"),
+      channel: z.string().optional().describe("Target channel to send the command to (uses active channel if omitted)"),
     },
-    async ({ nodeId, properties }) => {
+    async ({ nodeId, properties, channel }) => {
       try {
         const result = await sendCommandToFigma("set_instance_variant", {
           nodeId,
           properties,
-        });
+        }, { channel });
         const typedResult = result as { id: string; name: string; properties: Record<string, string> };
         return {
           content: [

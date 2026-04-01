@@ -22,8 +22,9 @@ export function registerCreationTools(server: McpServer): void {
         .string()
         .optional()
         .describe("Optional parent node ID to append the rectangle to"),
+      channel: z.string().optional().describe("Target channel to send the command to (uses active channel if omitted)"),
     },
-    async ({ x, y, width, height, name, parentId }) => {
+    async ({ x, y, width, height, name, parentId, channel }) => {
       try {
         const result = await sendCommandToFigma("create_rectangle", {
           x,
@@ -32,7 +33,7 @@ export function registerCreationTools(server: McpServer): void {
           height,
           name: name || "Rectangle",
           parentId,
-        });
+        }, { channel });
         return {
           content: [
             {
@@ -97,9 +98,9 @@ export function registerCreationTools(server: McpServer): void {
         .optional()
         .describe("Stroke color in RGBA format"),
       strokeWeight: z.number().positive().optional().describe("Stroke weight"),
+      channel: z.string().optional().describe("Target channel to send the command to (uses active channel if omitted)"),
     },
-    async ({
-      x,
+    async ({ x,
       y,
       width,
       height,
@@ -107,8 +108,7 @@ export function registerCreationTools(server: McpServer): void {
       parentId,
       fillColor,
       strokeColor,
-      strokeWeight,
-    }) => {
+      strokeWeight, channel }) => {
       try {
         const result = await sendCommandToFigma("create_frame", {
           x,
@@ -120,7 +120,7 @@ export function registerCreationTools(server: McpServer): void {
           fillColor: fillColor || { r: 1, g: 1, b: 1, a: 1 },
           strokeColor: strokeColor,
           strokeWeight: strokeWeight,
-        });
+        }, { channel });
         const typedResult = result as { name: string; id: string };
         return {
           content: [
@@ -191,8 +191,9 @@ export function registerCreationTools(server: McpServer): void {
         .positive()
         .optional()
         .describe("Fixed width for the text node. Use with textAutoResize HEIGHT for wrapping text within a specific width."),
+      channel: z.string().optional().describe("Target channel to send the command to (uses active channel if omitted)"),
     },
-    async ({ x, y, text, fontSize, fontWeight, fontColor, name, parentId, textAlignHorizontal, textAutoResize, width }) => {
+    async ({ x, y, text, fontSize, fontWeight, fontColor, name, parentId, textAlignHorizontal, textAutoResize, width, channel }) => {
       try {
         const result = await sendCommandToFigma("create_text", {
           x,
@@ -206,7 +207,7 @@ export function registerCreationTools(server: McpServer): void {
           textAlignHorizontal,
           textAutoResize,
           width,
-        });
+        }, { channel });
         const typedResult = result as { name: string; id: string };
         return {
           content: [
@@ -259,8 +260,9 @@ export function registerCreationTools(server: McpServer): void {
         .optional()
         .describe("Stroke color in RGBA format"),
       strokeWeight: z.number().positive().optional().describe("Stroke weight"),
+      channel: z.string().optional().describe("Target channel to send the command to (uses active channel if omitted)"),
     },
-    async ({ x, y, width, height, name, parentId, fillColor, strokeColor, strokeWeight }) => {
+    async ({ x, y, width, height, name, parentId, fillColor, strokeColor, strokeWeight, channel }) => {
       try {
         const result = await sendCommandToFigma("create_ellipse", {
           x,
@@ -272,7 +274,7 @@ export function registerCreationTools(server: McpServer): void {
           fillColor,
           strokeColor,
           strokeWeight,
-        });
+        }, { channel });
         
         const typedResult = result as { id: string, name: string };
         return {
@@ -327,8 +329,9 @@ export function registerCreationTools(server: McpServer): void {
         .optional()
         .describe("Stroke color in RGBA format"),
       strokeWeight: z.number().positive().optional().describe("Stroke weight"),
+      channel: z.string().optional().describe("Target channel to send the command to (uses active channel if omitted)"),
     },
-    async ({ x, y, width, height, sides, name, parentId, fillColor, strokeColor, strokeWeight }) => {
+    async ({ x, y, width, height, sides, name, parentId, fillColor, strokeColor, strokeWeight, channel }) => {
       try {
         const result = await sendCommandToFigma("create_polygon", {
           x,
@@ -341,7 +344,7 @@ export function registerCreationTools(server: McpServer): void {
           fillColor,
           strokeColor,
           strokeWeight,
-        });
+        }, { channel });
         
         const typedResult = result as { id: string, name: string };
         return {
@@ -397,8 +400,9 @@ export function registerCreationTools(server: McpServer): void {
         .optional()
         .describe("Stroke color in RGBA format"),
       strokeWeight: z.number().positive().optional().describe("Stroke weight"),
+      channel: z.string().optional().describe("Target channel to send the command to (uses active channel if omitted)"),
     },
-    async ({ x, y, width, height, points, innerRadius, name, parentId, fillColor, strokeColor, strokeWeight }) => {
+    async ({ x, y, width, height, points, innerRadius, name, parentId, fillColor, strokeColor, strokeWeight, channel }) => {
       try {
         const result = await sendCommandToFigma("create_star", {
           x,
@@ -412,7 +416,7 @@ export function registerCreationTools(server: McpServer): void {
           fillColor,
           strokeColor,
           strokeWeight,
-        });
+        }, { channel });
         
         const typedResult = result as { id: string, name: string };
         return {
@@ -442,14 +446,15 @@ export function registerCreationTools(server: McpServer): void {
     "Group nodes in Figma",
     {
       nodeIds: z.array(z.string()).describe("Array of IDs of the nodes to group"),
-      name: z.string().optional().describe("Optional name for the group")
+      name: z.string().optional().describe("Optional name for the group"),
+      channel: z.string().optional().describe("Target channel to send the command to (uses active channel if omitted)"),
     },
-    async ({ nodeIds, name }) => {
+    async ({ nodeIds, name, channel }) => {
       try {
         const result = await sendCommandToFigma("group_nodes", { 
           nodeIds, 
           name 
-        });
+        }, { channel });
         
         const typedResult = result as { 
           id: string, 
@@ -485,10 +490,11 @@ export function registerCreationTools(server: McpServer): void {
     "Ungroup nodes in Figma",
     {
       nodeId: z.string().describe("ID of the node (group or frame) to ungroup"),
+      channel: z.string().optional().describe("Target channel to send the command to (uses active channel if omitted)"),
     },
-    async ({ nodeId }) => {
+    async ({ nodeId, channel }) => {
       try {
-        const result = await sendCommandToFigma("ungroup_nodes", { nodeId });
+        const result = await sendCommandToFigma("ungroup_nodes", { nodeId }, { channel });
         
         const typedResult = result as { 
           success: boolean, 
@@ -524,11 +530,12 @@ export function registerCreationTools(server: McpServer): void {
     {
       nodeId: z.string().describe("The ID of the node to clone"),
       x: z.number().optional().describe("New X position for the clone (local coordinates, relative to parent)"),
-      y: z.number().optional().describe("New Y position for the clone (local coordinates, relative to parent)")
+      y: z.number().optional().describe("New Y position for the clone (local coordinates, relative to parent)"),
+      channel: z.string().optional().describe("Target channel to send the command to (uses active channel if omitted)"),
     },
-    async ({ nodeId, x, y }) => {
+    async ({ nodeId, x, y, channel }) => {
       try {
-        const result = await sendCommandToFigma('clone_node', { nodeId, x, y });
+        const result = await sendCommandToFigma('clone_node', { nodeId, x, y }, { channel });
         const typedResult = result as { name: string, id: string };
         return {
           content: [
@@ -558,15 +565,16 @@ export function registerCreationTools(server: McpServer): void {
     {
       parentId: z.string().describe("ID of the parent node where the child will be inserted"),
       childId: z.string().describe("ID of the child node to insert"),
-      index: z.number().optional().describe("Optional index where to insert the child (if not specified, it will be added at the end)")
+      index: z.number().optional().describe("Optional index where to insert the child (if not specified, it will be added at the end)"),
+      channel: z.string().optional().describe("Target channel to send the command to (uses active channel if omitted)"),
     },
-    async ({ parentId, childId, index }) => {
+    async ({ parentId, childId, index, channel }) => {
       try {
         const result = await sendCommandToFigma("insert_child", { 
           parentId, 
           childId,
           index 
-        });
+        }, { channel });
         
         const typedResult = result as { 
           parentId: string,
@@ -602,10 +610,11 @@ export function registerCreationTools(server: McpServer): void {
     "Flatten a node in Figma (e.g., for boolean operations or converting to path)",
     {
       nodeId: z.string().describe("ID of the node to flatten"),
+      channel: z.string().optional().describe("Target channel to send the command to (uses active channel if omitted)"),
     },
-    async ({ nodeId }) => {
+    async ({ nodeId, channel }) => {
       try {
-        const result = await sendCommandToFigma("flatten_node", { nodeId });
+        const result = await sendCommandToFigma("flatten_node", { nodeId }, { channel });
         
         const typedResult = result as { 
           id: string, 
@@ -642,14 +651,15 @@ export function registerCreationTools(server: McpServer): void {
       nodeIds: z.array(z.string()).min(2).describe("Array of node IDs to combine (minimum 2). Order matters for SUBTRACT."),
       operation: z.enum(["UNION", "SUBTRACT", "INTERSECT", "EXCLUDE"]).describe("Boolean operation type"),
       name: z.string().optional().describe("Optional name for the resulting node"),
+      channel: z.string().optional().describe("Target channel to send the command to (uses active channel if omitted)"),
     },
-    async ({ nodeIds, operation, name }) => {
+    async ({ nodeIds, operation, name, channel }) => {
       try {
         const result = await sendCommandToFigma("boolean_operation", {
           nodeIds,
           operation,
           name,
-        });
+        }, { channel });
         const typedResult = result as { id: string; name: string; type: string };
         return {
           content: [

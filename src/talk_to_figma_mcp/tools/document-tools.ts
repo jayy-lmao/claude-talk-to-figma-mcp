@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { sendCommandToFigma, joinChannel } from "../utils/websocket.js";
+import { sendCommandToFigma, joinChannel, getCurrentChannel, getJoinedChannels, setActiveChannel, leaveChannel } from "../utils/websocket.js";
 import { filterFigmaNode } from "../utils/figma-helpers.js";
 import { defaultPort } from "../config/config.js";
 
@@ -13,10 +13,12 @@ export function registerDocumentTools(server: McpServer): void {
   server.tool(
     "get_document_info",
     "Get detailed information about the current Figma document",
-    {},
-    async () => {
+    {
+      channel: z.string().optional().describe("Target channel to send the command to (uses active channel if omitted)"),
+    },
+    async ({ channel }) => {
       try {
-        const result = await sendCommandToFigma("get_document_info");
+        const result = await sendCommandToFigma("get_document_info", {}, { channel });
         return {
           content: [
             {
@@ -42,10 +44,12 @@ export function registerDocumentTools(server: McpServer): void {
   server.tool(
     "get_selection",
     "Get information about the current selection in Figma",
-    {},
-    async () => {
+    {
+      channel: z.string().optional().describe("Target channel to send the command to (uses active channel if omitted)"),
+    },
+    async ({ channel }) => {
       try {
-        const result = await sendCommandToFigma("get_selection");
+        const result = await sendCommandToFigma("get_selection", {}, { channel });
         return {
           content: [
             {
@@ -73,10 +77,11 @@ export function registerDocumentTools(server: McpServer): void {
     "Get detailed information about a specific node in Figma",
     {
       nodeId: z.string().describe("The ID of the node to get information about"),
+      channel: z.string().optional().describe("Target channel to send the command to (uses active channel if omitted)"),
     },
-    async ({ nodeId }) => {
+    async ({ nodeId, channel }) => {
       try {
-        const result = await sendCommandToFigma("get_node_info", { nodeId });
+        const result = await sendCommandToFigma("get_node_info", { nodeId }, { channel });
         const filtered = filterFigmaNode(result);
         const coordinateNote = filtered.absoluteBoundingBox && filtered.localPosition
           ? "absoluteBoundingBox contains global coordinates (relative to canvas). localPosition contains local coordinates (relative to parent, use these for move_node)."
@@ -110,11 +115,12 @@ export function registerDocumentTools(server: McpServer): void {
     "get_nodes_info",
     "Get detailed information about multiple nodes in Figma",
     {
-      nodeIds: z.array(z.string()).describe("Array of node IDs to get information about")
+      nodeIds: z.array(z.string()).describe("Array of node IDs to get information about"),
+      channel: z.string().optional().describe("Target channel to send the command to (uses active channel if omitted)"),
     },
-    async ({ nodeIds }) => {
+    async ({ nodeIds, channel }) => {
       try {
-        const results = await sendCommandToFigma('get_nodes_info', { nodeIds }) as any[];
+        const results = await sendCommandToFigma('get_nodes_info', { nodeIds }, { channel }) as any[];
         return {
           content: [
             {
@@ -140,10 +146,12 @@ export function registerDocumentTools(server: McpServer): void {
   server.tool(
     "get_styles",
     "Get all styles from the current Figma document",
-    {},
-    async () => {
+    {
+      channel: z.string().optional().describe("Target channel to send the command to (uses active channel if omitted)"),
+    },
+    async ({ channel }) => {
       try {
-        const result = await sendCommandToFigma("get_styles");
+        const result = await sendCommandToFigma("get_styles", {}, { channel });
         return {
           content: [
             {
@@ -169,10 +177,12 @@ export function registerDocumentTools(server: McpServer): void {
   server.tool(
     "get_local_components",
     "Get all local components from the Figma document",
-    {},
-    async () => {
+    {
+      channel: z.string().optional().describe("Target channel to send the command to (uses active channel if omitted)"),
+    },
+    async ({ channel }) => {
       try {
-        const result = await sendCommandToFigma("get_local_components");
+        const result = await sendCommandToFigma("get_local_components", {}, { channel });
         return {
           content: [
             {
@@ -198,10 +208,12 @@ export function registerDocumentTools(server: McpServer): void {
   server.tool(
     "get_remote_components",
     "Get remote library components currently used in the Figma document",
-    {},
-    async () => {
+    {
+      channel: z.string().optional().describe("Target channel to send the command to (uses active channel if omitted)"),
+    },
+    async ({ channel }) => {
       try {
-        const result = await sendCommandToFigma("get_remote_components");
+        const result = await sendCommandToFigma("get_remote_components", {}, { channel });
         return {
           content: [
             {
@@ -229,8 +241,9 @@ export function registerDocumentTools(server: McpServer): void {
     "Scan all text nodes in the selected Figma node",
     {
       nodeId: z.string().describe("ID of the node to scan"),
+      channel: z.string().optional().describe("Target channel to send the command to (uses active channel if omitted)"),
     },
-    async ({ nodeId }) => {
+    async ({ nodeId, channel }) => {
       try {
         // Initial response to indicate we're starting the process
         const initialStatus = {
@@ -243,7 +256,7 @@ export function registerDocumentTools(server: McpServer): void {
           nodeId,
           useChunking: true,  // Enable chunking on the plugin side
           chunkSize: 10       // Process 10 nodes at a time
-        });
+        }, { channel });
 
         // If the result indicates chunking was used, format the response accordingly
         if (result && typeof result === 'object' && 'chunks' in result) {
@@ -324,14 +337,14 @@ export function registerDocumentTools(server: McpServer): void {
           };
         }
 
-        // Use joinChannel instead of sendCommandToFigma to ensure currentChannel is updated
         await joinChannel(channel);
+        const joined = [...getJoinedChannels()];
 
         return {
           content: [
             {
               type: "text",
-              text: `Successfully joined channel: ${channel}`,
+              text: `Successfully joined channel: ${channel} (now active). Joined channels: ${joined.join(', ')}`,
             },
           ],
         };
@@ -407,6 +420,57 @@ export function registerDocumentTools(server: McpServer): void {
     }
   );
 
+  // Set Active Channel Tool
+  server.tool(
+    "set_active_channel",
+    "Switch the active channel for sending commands. The channel must already be joined via join_channel.",
+    {
+      channel: z.string().describe("The channel to set as active"),
+    },
+    async ({ channel }) => {
+      try {
+        setActiveChannel(channel);
+        return {
+          content: [{ type: "text", text: `Active channel set to "${channel}"` }],
+        };
+      } catch (error) {
+        return {
+          content: [{ type: "text", text: `Error: ${error instanceof Error ? error.message : String(error)}` }],
+        };
+      }
+    }
+  );
+
+  // List Channels Tool
+  server.tool(
+    "list_channels",
+    "List all currently joined channels and which one is active",
+    {},
+    async () => {
+      const joined = [...getJoinedChannels()];
+      const active = getCurrentChannel();
+      return {
+        content: [{ type: "text", text: JSON.stringify({ activeChannel: active, joinedChannels: joined }, null, 2) }],
+      };
+    }
+  );
+
+  // Leave Channel Tool
+  server.tool(
+    "leave_channel",
+    "Leave a previously joined channel. If leaving the active channel, another joined channel becomes active.",
+    {
+      channel: z.string().describe("The channel to leave"),
+    },
+    async ({ channel }) => {
+      leaveChannel(channel);
+      const active = getCurrentChannel();
+      return {
+        content: [{ type: "text", text: `Left channel "${channel}". Active channel: ${active ?? 'none'}` }],
+      };
+    }
+  );
+
   // Export Node as Image Tool
   server.tool(
     "export_node_as_image",
@@ -418,14 +482,15 @@ export function registerDocumentTools(server: McpServer): void {
         .optional()
         .describe("Export format"),
       scale: z.number().positive().optional().describe("Export scale"),
+      channel: z.string().optional().describe("Target channel to send the command to (uses active channel if omitted)"),
     },
-    async ({ nodeId, format, scale }) => {
+    async ({ nodeId, format, scale, channel }) => {
       try {
         const result = await sendCommandToFigma("export_node_as_image", {
           nodeId,
           format: format || "PNG",
           scale: scale || 1,
-        }, 120000); // 120 second timeout for image export
+        }, { timeoutMs: 120000, channel }); // 120 second timeout for image export
         const typedResult = result as { imageData: string; mimeType: string };
 
         return {
@@ -456,10 +521,11 @@ export function registerDocumentTools(server: McpServer): void {
     "Create a new page in the current Figma document",
     {
       name: z.string().describe("Name for the new page"),
+      channel: z.string().optional().describe("Target channel to send the command to (uses active channel if omitted)"),
     },
-    async ({ name }) => {
+    async ({ name, channel }) => {
       try {
-        const result = await sendCommandToFigma("create_page", { name });
+        const result = await sendCommandToFigma("create_page", { name }, { channel });
         const typedResult = result as { id: string; name: string };
         return {
           content: [
@@ -488,10 +554,11 @@ export function registerDocumentTools(server: McpServer): void {
     "Create a new slide in a Figma Slides document. Returns the slide ID and its contents/backgrounds layer IDs for adding child elements.",
     {
       name: z.string().optional().describe("Optional name for the slide"),
+      channel: z.string().optional().describe("Target channel to send the command to (uses active channel if omitted)"),
     },
-    async ({ name }) => {
+    async ({ name, channel }) => {
       try {
-        const result = await sendCommandToFigma("create_slide", { name });
+        const result = await sendCommandToFigma("create_slide", { name }, { channel });
         const typedResult = result as {
           id: string;
           name: string;
@@ -528,10 +595,11 @@ export function registerDocumentTools(server: McpServer): void {
     "Delete a page from the current Figma document",
     {
       pageId: z.string().describe("ID of the page to delete"),
+      channel: z.string().optional().describe("Target channel to send the command to (uses active channel if omitted)"),
     },
-    async ({ pageId }) => {
+    async ({ pageId, channel }) => {
       try {
-        const result = await sendCommandToFigma("delete_page", { pageId });
+        const result = await sendCommandToFigma("delete_page", { pageId }, { channel });
         const typedResult = result as { success: boolean; name: string };
         return {
           content: [
@@ -561,10 +629,11 @@ export function registerDocumentTools(server: McpServer): void {
     {
       pageId: z.string().describe("ID of the page to rename"),
       name: z.string().describe("New name for the page"),
+      channel: z.string().optional().describe("Target channel to send the command to (uses active channel if omitted)"),
     },
-    async ({ pageId, name }) => {
+    async ({ pageId, name, channel }) => {
       try {
-        const result = await sendCommandToFigma("rename_page", { pageId, name });
+        const result = await sendCommandToFigma("rename_page", { pageId, name }, { channel });
         const typedResult = result as { id: string; name: string; oldName: string };
         return {
           content: [
@@ -591,10 +660,12 @@ export function registerDocumentTools(server: McpServer): void {
   server.tool(
     "get_pages",
     "Get all pages in the current Figma document",
-    {},
-    async () => {
+    {
+      channel: z.string().optional().describe("Target channel to send the command to (uses active channel if omitted)"),
+    },
+    async ({ channel }) => {
       try {
-        const result = await sendCommandToFigma("get_pages");
+        const result = await sendCommandToFigma("get_pages", {}, { channel });
         return {
           content: [
             {
@@ -622,10 +693,11 @@ export function registerDocumentTools(server: McpServer): void {
     "Switch to a specific page in the Figma document",
     {
       pageId: z.string().describe("ID of the page to switch to"),
+      channel: z.string().optional().describe("Target channel to send the command to (uses active channel if omitted)"),
     },
-    async ({ pageId }) => {
+    async ({ pageId, channel }) => {
       try {
-        const result = await sendCommandToFigma("set_current_page", { pageId });
+        const result = await sendCommandToFigma("set_current_page", { pageId }, { channel });
         const typedResult = result as { id: string; name: string };
         return {
           content: [
@@ -655,10 +727,11 @@ export function registerDocumentTools(server: McpServer): void {
     {
       pageId: z.string().describe("ID of the page to duplicate"),
       name: z.string().optional().describe("Optional name for the duplicated page (defaults to 'Original Name (Copy)')"),
+      channel: z.string().optional().describe("Target channel to send the command to (uses active channel if omitted)"),
     },
-    async ({ pageId, name }) => {
+    async ({ pageId, name, channel }) => {
       try {
-        const result = await sendCommandToFigma("duplicate_page", { pageId, name });
+        const result = await sendCommandToFigma("duplicate_page", { pageId, name }, { channel });
         const typedResult = result as { id: string; name: string; originalName: string };
         return {
           content: [

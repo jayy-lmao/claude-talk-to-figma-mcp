@@ -20,15 +20,16 @@ export function registerImageTools(server: McpServer): void {
       imageSource: z.string().describe("Image URL or base64 data string"),
       sourceType: z.enum(["url", "base64"]).describe("Source type: 'url' for image URL, 'base64' for base64 encoded data"),
       scaleMode: z.enum(["FILL", "FIT", "CROP", "TILE"]).optional().describe("Image scaling mode (default: FILL)"),
+      channel: z.string().optional().describe("Target channel to send the command to (uses active channel if omitted)"),
     },
-    async ({ nodeId, imageSource, sourceType, scaleMode }) => {
+    async ({ nodeId, imageSource, sourceType, scaleMode, channel }) => {
       try {
         const result = await sendCommandToFigma("set_image_fill", {
           nodeId,
           imageSource,
           sourceType,
           scaleMode: scaleMode || "FILL",
-        }, 60000); // 60 second timeout for image upload
+        }, 60000, { channel }); // 60 second timeout for image upload
 
         const typedResult = result as { name: string; scaleMode: string };
         return {
@@ -51,10 +52,11 @@ export function registerImageTools(server: McpServer): void {
     "Extract image metadata from a node",
     {
       nodeId: z.string().describe("The ID of the node to get image from"),
+      channel: z.string().optional().describe("Target channel to send the command to (uses active channel if omitted)"),
     },
-    async ({ nodeId }) => {
+    async ({ nodeId, channel }) => {
       try {
-        const result = await sendCommandToFigma("get_image_from_node", { nodeId });
+        const result = await sendCommandToFigma("get_image_from_node", { nodeId }, { channel });
         const typedResult = result as {
           name: string;
           hasImage: boolean;
@@ -106,15 +108,16 @@ export function registerImageTools(server: McpServer): void {
       newImageSource: z.string().describe("New image URL or base64 data"),
       sourceType: z.enum(["url", "base64"]).describe("Source type: 'url' or 'base64'"),
       preserveTransform: z.boolean().optional().describe("Preserve existing image transform (default: true)"),
+      channel: z.string().optional().describe("Target channel to send the command to (uses active channel if omitted)"),
     },
-    async ({ nodeId, newImageSource, sourceType, preserveTransform }) => {
+    async ({ nodeId, newImageSource, sourceType, preserveTransform, channel }) => {
       try {
         const result = await sendCommandToFigma("replace_image_fill", {
           nodeId,
           newImageSource,
           sourceType,
           preserveTransform: preserveTransform !== false,
-        }, 60000); // 60 second timeout
+        }, 60000, { channel }); // 60 second timeout
 
         const typedResult = result as { name: string; preserved: boolean };
         return {
@@ -140,8 +143,9 @@ export function registerImageTools(server: McpServer): void {
     {
       imageHash: z.string().optional().describe("Image hash to download"),
       nodeId: z.string().optional().describe("Node ID to get image from (alternative to imageHash)"),
+      channel: z.string().optional().describe("Target channel to send the command to (uses active channel if omitted)"),
     },
-    async ({ imageHash, nodeId }) => {
+    async ({ imageHash, nodeId, channel }) => {
       try {
         if (!imageHash && !nodeId) {
           throw new Error("Either imageHash or nodeId must be provided");
@@ -150,7 +154,7 @@ export function registerImageTools(server: McpServer): void {
         const result = await sendCommandToFigma("get_image_bytes", {
           imageHash,
           nodeId,
-        }, 120000); // 120 second timeout for download
+        }, 120000, { channel }); // 120 second timeout for download
 
         const typedResult = result as {
           imageData: string;
@@ -199,8 +203,9 @@ export function registerImageTools(server: McpServer): void {
       translateX: z.number().optional().describe("Horizontal translation offset"),
       translateY: z.number().optional().describe("Vertical translation offset"),
       scale: z.number().positive().optional().describe("Scale factor (1 = 100%)"),
+      channel: z.string().optional().describe("Target channel to send the command to (uses active channel if omitted)"),
     },
-    async ({ nodeId, scaleMode, rotation, translateX, translateY, scale }) => {
+    async ({ nodeId, scaleMode, rotation, translateX, translateY, scale, channel }) => {
       try {
         const result = await sendCommandToFigma("apply_image_transform", {
           nodeId,
@@ -209,7 +214,7 @@ export function registerImageTools(server: McpServer): void {
           translateX,
           translateY,
           scale,
-        });
+        }, { channel });
 
         const typedResult = result as { name: string; transformApplied: string[] };
         return {
@@ -239,8 +244,9 @@ export function registerImageTools(server: McpServer): void {
       tint: z.number().min(-1).max(1).optional().describe("Green/magenta shift (-1.0 to 1.0)"),
       highlights: z.number().min(-1).max(1).optional().describe("Bright area adjustment (-1.0 to 1.0)"),
       shadows: z.number().min(-1).max(1).optional().describe("Dark area adjustment (-1.0 to 1.0)"),
+      channel: z.string().optional().describe("Target channel to send the command to (uses active channel if omitted)"),
     },
-    async ({ nodeId, exposure, contrast, saturation, temperature, tint, highlights, shadows }) => {
+    async ({ nodeId, exposure, contrast, saturation, temperature, tint, highlights, shadows, channel }) => {
       try {
         const filters: Record<string, number> = {};
         if (exposure !== undefined) filters.exposure = exposure;
@@ -254,7 +260,7 @@ export function registerImageTools(server: McpServer): void {
         const result = await sendCommandToFigma("set_image_filters", {
           nodeId,
           filters,
-        });
+        }, { channel });
 
         const typedResult = result as { name: string; appliedFilters: Record<string, number> };
         return {

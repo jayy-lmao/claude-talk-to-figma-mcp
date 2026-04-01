@@ -61,10 +61,11 @@ export function registerPrototypingTools(server: McpServer): void {
     "Get all prototyping reactions (interactions) on a node in Figma",
     {
       nodeId: z.string().describe("The ID of the node to get reactions from"),
+      channel: z.string().optional().describe("Target channel to send the command to (uses active channel if omitted)"),
     },
-    async ({ nodeId }) => {
+    async ({ nodeId, channel }) => {
       try {
-        const result = await sendCommandToFigma("get_reactions", { nodeId });
+        const result = await sendCommandToFigma("get_reactions", { nodeId }, { channel });
         return {
           content: [
             {
@@ -104,8 +105,9 @@ export function registerPrototypingTools(server: McpServer): void {
       resetScrollPosition: z.boolean().optional().describe("Whether to reset scroll position on navigate (default: false)"),
       resetInteractions: z.boolean().optional().describe("Whether to reset interactions on navigate (default: false)"),
       resetVideoPosition: z.boolean().optional().describe("Whether to reset video position on navigate (default: false)"),
+      channel: z.string().optional().describe("Target channel to send the command to (uses active channel if omitted)"),
     },
-    async ({ nodeId, trigger, triggerTimeout, navigationType, destinationId, transition, overlayRelativePosition, resetScrollPosition, resetInteractions, resetVideoPosition }) => {
+    async ({ nodeId, trigger, triggerTimeout, navigationType, destinationId, transition, overlayRelativePosition, resetScrollPosition, resetInteractions, resetVideoPosition, channel }) => {
       try {
         const result = await sendCommandToFigma("add_reaction", {
           nodeId,
@@ -118,7 +120,7 @@ export function registerPrototypingTools(server: McpServer): void {
           resetScrollPosition,
           resetInteractions,
           resetVideoPosition,
-        });
+        }, { channel });
         return {
           content: [
             {
@@ -149,15 +151,16 @@ export function registerPrototypingTools(server: McpServer): void {
       trigger: TriggerSchema,
       actionType: z.enum(["BACK", "CLOSE"]).describe("BACK to go back, CLOSE to close overlay"),
       transition: TransitionSchema,
+      channel: z.string().optional().describe("Target channel to send the command to (uses active channel if omitted)"),
     },
-    async ({ nodeId, trigger, actionType, transition }) => {
+    async ({ nodeId, trigger, actionType, transition, channel }) => {
       try {
         const result = await sendCommandToFigma("add_back_reaction", {
           nodeId,
           trigger,
           actionType,
           transition,
-        });
+        }, { channel });
         return {
           content: [
             {
@@ -187,14 +190,15 @@ export function registerPrototypingTools(server: McpServer): void {
       nodeId: z.string().describe("The ID of the node to add the reaction to"),
       trigger: TriggerSchema,
       url: z.string().describe("The URL to open"),
+      channel: z.string().optional().describe("Target channel to send the command to (uses active channel if omitted)"),
     },
-    async ({ nodeId, trigger, url }) => {
+    async ({ nodeId, trigger, url, channel }) => {
       try {
         const result = await sendCommandToFigma("add_url_reaction", {
           nodeId,
           trigger,
           url,
-        });
+        }, { channel });
         return {
           content: [
             {
@@ -223,13 +227,14 @@ export function registerPrototypingTools(server: McpServer): void {
     {
       nodeId: z.string().describe("The ID of the node to remove reactions from"),
       reactionIndex: z.number().int().min(0).optional().describe("Index of the specific reaction to remove. Omit to remove all reactions."),
+      channel: z.string().optional().describe("Target channel to send the command to (uses active channel if omitted)"),
     },
-    async ({ nodeId, reactionIndex }) => {
+    async ({ nodeId, reactionIndex, channel }) => {
       try {
         const result = await sendCommandToFigma("remove_reactions", {
           nodeId,
           reactionIndex,
-        });
+        }, { channel });
         return {
           content: [
             {
@@ -258,7 +263,7 @@ export function registerPrototypingTools(server: McpServer): void {
     {},
     async () => {
       try {
-        const result = await sendCommandToFigma("get_flow_starting_points", {});
+        const result = await sendCommandToFigma("get_flow_starting_points", {}, { channel });
         return {
           content: [
             {
@@ -287,13 +292,14 @@ export function registerPrototypingTools(server: McpServer): void {
     {
       nodeId: z.string().describe("The ID of the node (must be a top-level frame)"),
       name: z.string().optional().describe("Name for the flow starting point. Omit or set empty to remove as starting point."),
+      channel: z.string().optional().describe("Target channel to send the command to (uses active channel if omitted)"),
     },
-    async ({ nodeId, name }) => {
+    async ({ nodeId, name, channel }) => {
       try {
         const result = await sendCommandToFigma("set_flow_starting_point", {
           nodeId,
           name,
-        });
+        }, { channel });
         return {
           content: [
             {
@@ -328,14 +334,15 @@ export function registerPrototypingTools(server: McpServer): void {
       ]).describe("NONE for no device, PRESET for a specific device"),
       presetIdentifier: z.string().optional().describe("Device preset identifier (e.g., 'APPLE_IPHONE_16', 'APPLE_IPHONE_16_PRO', 'ANDROID_SMALL', 'APPLE_IPAD_MINI_8_3'). Required when deviceType is PRESET."),
       rotation: z.enum(["NONE", "CCW_90"]).optional().describe("Device rotation (default: NONE)"),
+      channel: z.string().optional().describe("Target channel to send the command to (uses active channel if omitted)"),
     },
-    async ({ deviceType, presetIdentifier, rotation }) => {
+    async ({ deviceType, presetIdentifier, rotation, channel }) => {
       try {
         const result = await sendCommandToFigma("set_prototype_device", {
           deviceType,
           presetIdentifier,
           rotation,
-        });
+        }, { channel });
         return {
           content: [
             {
@@ -363,12 +370,13 @@ export function registerPrototypingTools(server: McpServer): void {
     "Set the starting node for prototype presentation on the current page",
     {
       nodeId: z.string().optional().describe("The ID of the node to set as the prototype start. Omit to clear the start node."),
+      channel: z.string().optional().describe("Target channel to send the command to (uses active channel if omitted)"),
     },
-    async ({ nodeId }) => {
+    async ({ nodeId, channel }) => {
       try {
         const result = await sendCommandToFigma("set_prototype_start_node", {
           nodeId,
-        });
+        }, { channel });
         return {
           content: [
             {

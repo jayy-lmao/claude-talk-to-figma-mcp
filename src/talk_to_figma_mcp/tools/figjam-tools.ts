@@ -29,7 +29,7 @@ export function registerFigJamTools(server: McpServer): void {
     {},
     async () => {
       try {
-        const result = await sendCommandToFigma("get_figjam_elements", {});
+        const result = await sendCommandToFigma("get_figjam_elements", {}, { channel });
         return {
           content: [
             {
@@ -89,8 +89,9 @@ export function registerFigJamTools(server: McpServer): void {
         .string()
         .optional()
         .describe("Optional parent node ID (e.g. a section) to place the sticky into"),
+      channel: z.string().optional().describe("Target channel to send the command to (uses active channel if omitted)"),
     },
-    async ({ x, y, text, color, isWide, name, parentId }) => {
+    async ({ x, y, text, color, isWide, name, parentId, channel }) => {
       try {
         const result = await sendCommandToFigma("create_sticky", {
           x,
@@ -100,7 +101,7 @@ export function registerFigJamTools(server: McpServer): void {
           isWide: isWide ?? false,
           name,
           parentId,
-        });
+        }, { channel });
         return {
           content: [
             {
@@ -131,13 +132,14 @@ export function registerFigJamTools(server: McpServer): void {
     {
       nodeId: z.string().describe("The ID of the sticky note node to update"),
       text: z.string().describe("The new text content"),
+      channel: z.string().optional().describe("Target channel to send the command to (uses active channel if omitted)"),
     },
-    async ({ nodeId, text }) => {
+    async ({ nodeId, text, channel }) => {
       try {
         const result = await sendCommandToFigma("set_sticky_text", {
           nodeId,
           text,
-        });
+        }, { channel });
         return {
           content: [
             {
@@ -198,8 +200,9 @@ export function registerFigJamTools(server: McpServer): void {
         .string()
         .optional()
         .describe("Optional parent node ID to place the shape into"),
+      channel: z.string().optional().describe("Target channel to send the command to (uses active channel if omitted)"),
     },
-    async ({ x, y, width, height, shapeType, text, fillColor, name, parentId }) => {
+    async ({ x, y, width, height, shapeType, text, fillColor, name, parentId, channel }) => {
       try {
         const result = await sendCommandToFigma("create_shape_with_text", {
           x,
@@ -211,7 +214,7 @@ export function registerFigJamTools(server: McpServer): void {
           fillColor,
           name,
           parentId,
-        });
+        }, { channel });
         return {
           content: [
             {
@@ -287,9 +290,9 @@ export function registerFigJamTools(server: McpServer): void {
         .describe("Stroke color in RGBA format"),
       strokeWeight: z.number().positive().optional().describe("Stroke weight / line thickness"),
       name: z.string().optional().describe("Optional name for the connector node"),
+      channel: z.string().optional().describe("Target channel to send the command to (uses active channel if omitted)"),
     },
-    async ({
-      startNodeId,
+    async ({ startNodeId,
       startX,
       startY,
       endNodeId,
@@ -300,8 +303,7 @@ export function registerFigJamTools(server: McpServer): void {
       endStrokeCap,
       strokeColor,
       strokeWeight,
-      name,
-    }) => {
+      name, channel }) => {
       try {
         const result = await sendCommandToFigma("create_connector", {
           startNodeId,
@@ -316,7 +318,7 @@ export function registerFigJamTools(server: McpServer): void {
           strokeColor,
           strokeWeight,
           name,
-        });
+        }, { channel });
         return {
           content: [
             {
@@ -359,8 +361,9 @@ export function registerFigJamTools(server: McpServer): void {
         })
         .optional()
         .describe("Background fill color in RGBA format"),
+      channel: z.string().optional().describe("Target channel to send the command to (uses active channel if omitted)"),
     },
-    async ({ x, y, width, height, name, fillColor }) => {
+    async ({ x, y, width, height, name, fillColor, channel }) => {
       try {
         const result = await sendCommandToFigma("create_section", {
           x,
@@ -369,7 +372,7 @@ export function registerFigJamTools(server: McpServer): void {
           height: height ?? 600,
           name: name ?? "Section",
           fillColor,
-        });
+        }, { channel });
         return {
           content: [
             {

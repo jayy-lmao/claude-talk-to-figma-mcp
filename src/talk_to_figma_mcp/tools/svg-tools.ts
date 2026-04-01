@@ -17,8 +17,9 @@ export function registerSvgTools(server: McpServer): void {
       y: z.number().optional().describe("Y position for the imported SVG (default: 0)"),
       name: z.string().optional().describe("Optional name for the imported node"),
       parentId: z.string().optional().describe("Optional parent node ID to place the SVG into"),
+      channel: z.string().optional().describe("Target channel to send the command to (uses active channel if omitted)"),
     },
-    async ({ svgString, x, y, name, parentId }) => {
+    async ({ svgString, x, y, name, parentId, channel }) => {
       try {
         const result = await sendCommandToFigma("set_svg", {
           svgString,
@@ -26,7 +27,7 @@ export function registerSvgTools(server: McpServer): void {
           y: y || 0,
           name,
           parentId,
-        });
+        }, { channel });
         const typedResult = result as { id: string; name: string; width: number; height: number };
         return {
           content: [
@@ -55,10 +56,11 @@ export function registerSvgTools(server: McpServer): void {
     "Export a single node as an SVG string from Figma. Returns the SVG markup including all nested children.",
     {
       nodeId: z.string().describe("The ID of the node to export as SVG"),
+      channel: z.string().optional().describe("Target channel to send the command to (uses active channel if omitted)"),
     },
-    async ({ nodeId }) => {
+    async ({ nodeId, channel }) => {
       try {
-        const result = await sendCommandToFigma("get_svg", { nodeId }, 120000);
+        const result = await sendCommandToFigma("get_svg", { nodeId }, { timeoutMs: 120000, channel });
         const typedResult = result as { svgString: string; name: string };
         return {
           content: [

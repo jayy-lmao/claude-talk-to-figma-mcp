@@ -7,7 +7,8 @@ import { startEmbeddedServer, isServerRunning } from "./embedded-server";
 
 // WebSocket connection and request tracking
 let ws: WebSocket | null = null;
-let currentChannel: string | null = null;
+const joinedChannels = new Set<string>();
+let activeChannel: string | null = null;
 
 // Map of pending requests for promise tracking
 const pendingRequests = new Map<string, PendingRequest>();
@@ -66,8 +67,9 @@ export async function connectToFigma(port: number = defaultPort) {
     ws.on('open', () => {
       clearTimeout(connectionTimeout);
       logger.info('Connected to Figma socket server');
-      // Reset channel on new connection
-      currentChannel = null;
+      // Reset channels on new connection
+      joinedChannels.clear();
+      activeChannel = null;
     });
 
     ws.on("message", (data: any) => {
@@ -188,13 +190,15 @@ export async function joinChannel(channelName: string): Promise<void> {
 
   try {
     await sendCommandToFigma("join", { channel: channelName });
-    currentChannel = channelName;
+    joinedChannels.add(channelName);
+    activeChannel = channelName;
 
     try {
-      await sendCommandToFigma("ping", {}, 12000);
+      await sendCommandToFigma("ping", {}, { timeoutMs: 12000 });
       logger.info(`Joined channel: ${channelName}`);
     } catch (verificationError) {
-      currentChannel = null;
+      joinedChannels.delete(channelName);
+      activeChannel = joinedChannels.size > 0 ? [...joinedChannels][0] : null;
       const errorMsg = verificationError instanceof Error
         ? verificationError.message
         : String(verificationError);
@@ -212,7 +216,7 @@ export async function joinChannel(channelName: string): Promise<void> {
  * @returns The current channel name or null if not connected to any channel
  */
 export function getCurrentChannel(): string | null {
-  return currentChannel;
+  return activeChannel;
 }
 
 /**
@@ -225,8 +229,9 @@ export function getCurrentChannel(): string | null {
 export function sendCommandToFigma(
   command: FigmaCommand,
   params: unknown = {},
-  timeoutMs: number = 60000
+  options: { timeoutMs?: number; channel?: string } = {}
 ): Promise<unknown> {
+  const { timeoutMs = 60000, channel } = options;
   return new Promise((resolve, reject) => {
     // If not connected, try to connect first
     if (!ws || ws.readyState !== WebSocket.OPEN) {
@@ -236,8 +241,9 @@ export function sendCommandToFigma(
     }
 
     // Check if we need a channel for this command
+    const targetChannel = channel ?? activeChannel;
     const requiresChannel = command !== "join";
-    if (requiresChannel && !currentChannel) {
+    if (requiresChannel && !targetChannel) {
       reject(new Error("Must join a channel before sending commands"));
       return;
     }
@@ -248,7 +254,7 @@ export function sendCommandToFigma(
       type: command === "join" ? "join" : "message",
       ...(command === "join"
         ? { channel: (params as any).channel }
-        : { channel: currentChannel }),
+        : { channel: targetChannel }),
       message: {
         id,
         command,
@@ -281,4 +287,33 @@ export function sendCommandToFigma(
     logger.debug(`Request details: ${JSON.stringify(request)}`);
     ws.send(JSON.stringify(request));
   });
+}
+
+/**
+ * Get all currently joined channels.
+ */
+export function getJoinedChannels(): ReadonlySet<string> {
+  return joinedChannels;
+}
+
+/**
+ * Switch the active channel without re-joining.
+ * The channel must already be in the joined set.
+ */
+export function setActiveChannel(channelName: string): void {
+  if (!joinedChannels.has(channelName)) {
+    throw new Error(`Not joined to channel "${channelName}". Joined channels: ${[...joinedChannels].join(', ')}`);
+  }
+  activeChannel = channelName;
+}
+
+/**
+ * Leave a previously joined channel.
+ * If the left channel was active, falls back to another joined channel or null.
+ */
+export function leaveChannel(channelName: string): void {
+  joinedChannels.delete(channelName);
+  if (activeChannel === channelName) {
+    activeChannel = joinedChannels.size > 0 ? [...joinedChannels][0] : null;
+  }
 }

@@ -15,7 +15,7 @@ export function registerVariableTools(server: McpServer): void {
     {},
     async () => {
       try {
-        const result = await sendCommandToFigma("get_variables", {});
+        const result = await sendCommandToFigma("get_variables", {}, { channel });
         const typedResult = result as { collections: any[] };
         return {
           content: [
@@ -49,8 +49,9 @@ export function registerVariableTools(server: McpServer): void {
       resolvedType: z.enum(["COLOR", "FLOAT", "STRING", "BOOLEAN"]).describe("Variable type"),
       value: z.any().describe("Variable value. COLOR: {r,g,b,a} (0-1). FLOAT: number. STRING: string. BOOLEAN: boolean."),
       modeId: z.string().optional().describe("Mode ID to set the value for (uses default mode if omitted)"),
+      channel: z.string().optional().describe("Target channel to send the command to (uses active channel if omitted)"),
     },
-    async ({ collectionId, collectionName, name, resolvedType, value, modeId }) => {
+    async ({ collectionId, collectionName, name, resolvedType, value, modeId, channel }) => {
       try {
         const result = await sendCommandToFigma("set_variable", {
           collectionId,
@@ -59,7 +60,7 @@ export function registerVariableTools(server: McpServer): void {
           resolvedType,
           value,
           modeId,
-        });
+        }, { channel });
         const typedResult = result as { variableId: string; variableName: string; collectionName: string };
         return {
           content: [
@@ -90,14 +91,15 @@ export function registerVariableTools(server: McpServer): void {
       nodeId: z.string().describe("The ID of the node to bind the variable to"),
       variableId: z.string().describe("The ID of the variable to bind"),
       field: z.string().describe("The node property field to bind (e.g., 'fills/0/color', 'opacity', 'width', 'height')"),
+      channel: z.string().optional().describe("Target channel to send the command to (uses active channel if omitted)"),
     },
-    async ({ nodeId, variableId, field }) => {
+    async ({ nodeId, variableId, field, channel }) => {
       try {
         const result = await sendCommandToFigma("apply_variable_to_node", {
           nodeId,
           variableId,
           field,
-        });
+        }, { channel });
         const typedResult = result as { nodeName: string; variableName: string; field: string };
         return {
           content: [
@@ -126,12 +128,13 @@ export function registerVariableTools(server: McpServer): void {
     "Delete a variable by its ID. Use get_variables first to find the variable ID.",
     {
       variableId: z.string().describe("The ID of the variable to delete (e.g., 'VariableID:34:4353')"),
+      channel: z.string().optional().describe("Target channel to send the command to (uses active channel if omitted)"),
     },
-    async ({ variableId }) => {
+    async ({ variableId, channel }) => {
       try {
         const result = await sendCommandToFigma("delete_variable", {
           variableId,
-        });
+        }, { channel });
         const typedResult = result as { deletedVariableId: string; deletedVariableName: string };
         return {
           content: [
@@ -160,12 +163,13 @@ export function registerVariableTools(server: McpServer): void {
     "Delete an entire variable collection and all its variables by collection ID. Use get_variables first to find the collection ID.",
     {
       collectionId: z.string().describe("The ID of the variable collection to delete (e.g., 'VariableCollectionId:34:4352')"),
+      channel: z.string().optional().describe("Target channel to send the command to (uses active channel if omitted)"),
     },
-    async ({ collectionId }) => {
+    async ({ collectionId, channel }) => {
       try {
         const result = await sendCommandToFigma("delete_variable_collection", {
           collectionId,
-        });
+        }, { channel });
         const typedResult = result as { deletedCollectionId: string; deletedCollectionName: string; deletedVariableCount: number };
         return {
           content: [
@@ -196,14 +200,15 @@ export function registerVariableTools(server: McpServer): void {
       nodeId: z.string().describe("The ID of the node to switch mode on"),
       collectionId: z.string().describe("The ID of the variable collection"),
       modeId: z.string().describe("The ID of the mode to switch to"),
+      channel: z.string().optional().describe("Target channel to send the command to (uses active channel if omitted)"),
     },
-    async ({ nodeId, collectionId, modeId }) => {
+    async ({ nodeId, collectionId, modeId, channel }) => {
       try {
         const result = await sendCommandToFigma("switch_variable_mode", {
           nodeId,
           collectionId,
           modeId,
-        });
+        }, { channel });
         const typedResult = result as { nodeName: string; collectionName: string; modeName: string };
         return {
           content: [

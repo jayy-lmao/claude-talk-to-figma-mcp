@@ -67,13 +67,12 @@ export function registerCompoundTools(server: McpServer): void {
         .boolean()
         .optional()
         .describe("Whether strokes are included in layout calculations"),
+      channel: z.string().optional().describe("Target channel to send the command to (uses active channel if omitted)"),
     },
-    async ({
-      x, y, width, height, name, parentId, fillColor, strokeColor, strokeWeight,
+    async ({ x, y, width, height, name, parentId, fillColor, strokeColor, strokeWeight,
       layoutMode, paddingTop, paddingBottom, paddingLeft, paddingRight,
       itemSpacing, primaryAxisAlignItems, counterAxisAlignItems, layoutWrap,
-      strokesIncludedInLayout,
-    }) => {
+      strokesIncludedInLayout, channel }) => {
       try {
         // Step 1: create the frame
         const frameResult = await sendCommandToFigma("create_frame", {
@@ -86,7 +85,7 @@ export function registerCompoundTools(server: McpServer): void {
           fillColor: fillColor || { r: 1, g: 1, b: 1, a: 1 },
           strokeColor,
           strokeWeight,
-        });
+        }, { channel });
         const typedFrame = frameResult as { name: string; id: string };
 
         // Step 2: apply auto-layout
@@ -102,7 +101,7 @@ export function registerCompoundTools(server: McpServer): void {
           counterAxisAlignItems,
           layoutWrap,
           strokesIncludedInLayout,
-        });
+        }, { channel });
 
         return {
           content: [
@@ -159,8 +158,9 @@ export function registerCompoundTools(server: McpServer): void {
         .max(1)
         .optional()
         .describe("Node opacity (0 = fully transparent, 1 = fully opaque)"),
+      channel: z.string().optional().describe("Target channel to send the command to (uses active channel if omitted)"),
     },
-    async ({ nodeId, fillColor, strokeColor, strokeWeight, cornerRadius, opacity }) => {
+    async ({ nodeId, fillColor, strokeColor, strokeWeight, cornerRadius, opacity, channel }) => {
       const applied: string[] = [];
       try {
         if (fillColor !== undefined) {
@@ -168,7 +168,7 @@ export function registerCompoundTools(server: McpServer): void {
           await sendCommandToFigma("set_fill_color", {
             nodeId,
             color: colorWithDefaults,
-          });
+          }, { channel });
           applied.push(
             `fill RGBA(${fillColor.r}, ${fillColor.g}, ${fillColor.b}, ${colorWithDefaults.a})`
           );
@@ -181,7 +181,7 @@ export function registerCompoundTools(server: McpServer): void {
             nodeId,
             color: colorWithDefaults,
             strokeWeight: weight,
-          });
+          }, { channel });
           applied.push(
             `stroke RGBA(${strokeColor.r}, ${strokeColor.g}, ${strokeColor.b}, ${colorWithDefaults.a}) weight=${weight}`
           );
@@ -192,7 +192,7 @@ export function registerCompoundTools(server: McpServer): void {
             nodeId,
             radius: cornerRadius,
             corners: [true, true, true, true],
-          });
+          }, { channel });
           applied.push(`cornerRadius=${cornerRadius}`);
         }
 
@@ -200,7 +200,7 @@ export function registerCompoundTools(server: McpServer): void {
           await sendCommandToFigma("set_node_properties", {
             nodeId,
             opacity,
-          });
+          }, { channel });
           applied.push(`opacity=${opacity}`);
         }
 
@@ -310,8 +310,9 @@ export function registerCompoundTools(server: McpServer): void {
         )
         .min(1)
         .describe("Array of node definitions to create"),
+      channel: z.string().optional().describe("Target channel to send the command to (uses active channel if omitted)"),
     },
-    async ({ nodes }) => {
+    async ({ nodes, channel }) => {
       const created: Array<{ index: number; type: string; name: string; id: string }> = [];
       const errors: Array<{ index: number; type: string; error: string }> = [];
 
@@ -330,7 +331,7 @@ export function registerCompoundTools(server: McpServer): void {
               fillColor: node.fillColor,
               strokeColor: node.strokeColor,
               strokeWeight: node.strokeWeight,
-            });
+            }, { channel });
           } else if (node.type === "frame") {
             result = await sendCommandToFigma("create_frame", {
               x: node.x,
@@ -342,7 +343,7 @@ export function registerCompoundTools(server: McpServer): void {
               fillColor: node.fillColor || { r: 1, g: 1, b: 1, a: 1 },
               strokeColor: node.strokeColor,
               strokeWeight: node.strokeWeight,
-            });
+            }, { channel });
           } else if (node.type === "text") {
             result = await sendCommandToFigma("create_text", {
               x: node.x,
@@ -355,7 +356,7 @@ export function registerCompoundTools(server: McpServer): void {
               parentId: node.parentId,
               width: node.width,
               textAlignHorizontal: node.textAlignHorizontal,
-            });
+            }, { channel });
           } else if (node.type === "ellipse") {
             result = await sendCommandToFigma("create_ellipse", {
               x: node.x,
@@ -367,7 +368,7 @@ export function registerCompoundTools(server: McpServer): void {
               fillColor: node.fillColor,
               strokeColor: node.strokeColor,
               strokeWeight: node.strokeWeight,
-            });
+            }, { channel });
           } else {
             throw new Error(`Unsupported node type: ${(node as { type: string }).type}`);
           }
@@ -423,11 +424,12 @@ export function registerCompoundTools(server: McpServer): void {
         .boolean()
         .optional()
         .describe("Whether to include remote library components (default: true)"),
+      channel: z.string().optional().describe("Target channel to send the command to (uses active channel if omitted)"),
     },
-    async ({ filter, includeRemote = true }) => {
+    async ({ filter, includeRemote = true, channel }) => {
       try {
         // Fetch local components
-        const localResult = await sendCommandToFigma("get_local_components");
+        const localResult = await sendCommandToFigma("get_local_components", {}, { channel });
         const typedLocal = localResult as {
           count: number;
           components: Array<{ id: string; name: string; key: string | null }>;
@@ -444,7 +446,7 @@ export function registerCompoundTools(server: McpServer): void {
         let remoteComponents: RemoteComponent[] = [];
         if (includeRemote) {
           try {
-            const remoteResult = await sendCommandToFigma("get_remote_components");
+            const remoteResult = await sendCommandToFigma("get_remote_components", {}, { channel });
             const typedRemote = remoteResult as { components: RemoteComponent[] };
             remoteComponents = typedRemote.components ?? [];
           } catch {
@@ -536,15 +538,16 @@ export function registerCompoundTools(server: McpServer): void {
         .describe(
           "Variant properties to set as key→value pairs (e.g. { \"State\": \"Hover\", \"Size\": \"Large\" })"
         ),
+      channel: z.string().optional().describe("Target channel to send the command to (uses active channel if omitted)"),
     },
-    async ({ componentKey, x, y, parentId, componentProperties, variantProperties }) => {
+    async ({ componentKey, x, y, parentId, componentProperties, variantProperties, channel }) => {
       try {
         // Step 1: create the instance
         const instanceResult = await sendCommandToFigma("create_component_instance", {
           componentKey,
           x,
           y,
-        });
+        }, { channel });
         const typedInstance = instanceResult as { id: string; name: string; [key: string]: unknown };
         const instanceId = typedInstance.id;
 
@@ -553,7 +556,7 @@ export function registerCompoundTools(server: McpServer): void {
           await sendCommandToFigma("insert_child", {
             parentId,
             childId: instanceId,
-          });
+          }, { channel });
         }
 
         const applied: string[] = [];
@@ -563,7 +566,7 @@ export function registerCompoundTools(server: McpServer): void {
           await sendCommandToFigma("set_component_property", {
             nodeId: instanceId,
             properties: componentProperties,
-          });
+          }, { channel });
           applied.push(`componentProperties: ${JSON.stringify(componentProperties)}`);
         }
 
@@ -572,7 +575,7 @@ export function registerCompoundTools(server: McpServer): void {
           await sendCommandToFigma("set_instance_variant", {
             nodeId: instanceId,
             properties: variantProperties,
-          });
+          }, { channel });
           applied.push(`variantProperties: ${JSON.stringify(variantProperties)}`);
         }
 
@@ -617,15 +620,16 @@ export function registerCompoundTools(server: McpServer): void {
         )
         .min(1)
         .describe("Array of text node updates to apply"),
+      channel: z.string().optional().describe("Target channel to send the command to (uses active channel if omitted)"),
     },
-    async ({ updates }) => {
+    async ({ updates, channel }) => {
       const succeeded: Array<{ index: number; nodeId: string; text: string }> = [];
       const failed: Array<{ index: number; nodeId: string; error: string }> = [];
 
       for (let i = 0; i < updates.length; i++) {
         const { nodeId, text } = updates[i];
         try {
-          await sendCommandToFigma("set_text_content", { nodeId, text });
+          await sendCommandToFigma("set_text_content", { nodeId, text }, { channel });
           succeeded.push({ index: i, nodeId, text });
         } catch (error) {
           failed.push({
@@ -683,8 +687,9 @@ export function registerCompoundTools(server: McpServer): void {
         )
         .min(1)
         .describe("Array of variant swap operations to apply"),
+      channel: z.string().optional().describe("Target channel to send the command to (uses active channel if omitted)"),
     },
-    async ({ updates }) => {
+    async ({ updates, channel }) => {
       const succeeded: Array<{ index: number; nodeId: string; variantProperties: Record<string, string> }> = [];
       const failed: Array<{ index: number; nodeId: string; error: string }> = [];
 
@@ -694,7 +699,7 @@ export function registerCompoundTools(server: McpServer): void {
           await sendCommandToFigma("set_instance_variant", {
             nodeId,
             properties: variantProperties,
-          });
+          }, { channel });
           succeeded.push({ index: i, nodeId, variantProperties });
         } catch (error) {
           failed.push({
@@ -783,12 +788,11 @@ export function registerCompoundTools(server: McpServer): void {
           })
         )
         .describe("List of components to place inside the screen frame"),
+      channel: z.string().optional().describe("Target channel to send the command to (uses active channel if omitted)"),
     },
-    async ({
-      screenName, x, y, width, height, fillColor, layoutMode,
+    async ({ screenName, x, y, width, height, fillColor, layoutMode,
       paddingTop, paddingBottom, paddingLeft, paddingRight, itemSpacing,
-      components,
-    }) => {
+      components, channel }) => {
       try {
         // Step 1: create the screen frame
         const frameResult = await sendCommandToFigma("create_frame", {
@@ -798,7 +802,7 @@ export function registerCompoundTools(server: McpServer): void {
           height,
           name: screenName,
           fillColor: fillColor || { r: 1, g: 1, b: 1, a: 1 },
-        });
+        }, { channel });
         const typedFrame = frameResult as { id: string; name: string };
         const frameId = typedFrame.id;
 
@@ -812,7 +816,7 @@ export function registerCompoundTools(server: McpServer): void {
             paddingLeft,
             paddingRight,
             itemSpacing,
-          });
+          }, { channel });
         }
 
         // Step 3: place each component instance inside the frame
@@ -827,7 +831,7 @@ export function registerCompoundTools(server: McpServer): void {
               componentKey: spec.componentKey,
               x: spec.x,
               y: spec.y,
-            });
+            }, { channel });
             const typedInstance = instanceResult as { id: string; name: string };
             const instanceId = typedInstance.id;
 
@@ -835,14 +839,14 @@ export function registerCompoundTools(server: McpServer): void {
             await sendCommandToFigma("insert_child", {
               parentId: frameId,
               childId: instanceId,
-            });
+            }, { channel });
 
             // Apply component property overrides (text, boolean inputs)
             if (spec.componentProperties && Object.keys(spec.componentProperties).length > 0) {
               await sendCommandToFigma("set_component_property", {
                 nodeId: instanceId,
                 properties: spec.componentProperties,
-              });
+              }, { channel });
             }
 
             // Apply variant properties (State, Size, etc.)
@@ -850,7 +854,7 @@ export function registerCompoundTools(server: McpServer): void {
               await sendCommandToFigma("set_instance_variant", {
                 nodeId: instanceId,
                 properties: spec.variantProperties,
-              });
+              }, { channel });
             }
 
             placed.push({

@@ -15,13 +15,14 @@ export function registerTextTools(server: McpServer): void {
     {
       nodeId: z.string().describe("The ID of the text node to modify"),
       text: z.string().describe("New text content"),
+      channel: z.string().optional().describe("Target channel to send the command to (uses active channel if omitted)"),
     },
-    async ({ nodeId, text }) => {
+    async ({ nodeId, text, channel }) => {
       try {
         const result = await sendCommandToFigma("set_text_content", {
           nodeId,
           text,
-        });
+        }, { channel });
         const typedResult = result as { name: string };
         return {
           content: [
@@ -60,6 +61,7 @@ export function registerTextTools(server: McpServer): void {
           })
         )
         .describe("Array of text node IDs and their replacement texts"),
+      channel: z.string().optional().describe("Target channel to send the command to (uses active channel if omitted)"),
     },
     async ({ nodeId, text }, extra) => {
       try {
@@ -88,7 +90,7 @@ export function registerTextTools(server: McpServer): void {
         const result = await sendCommandToFigma("set_multiple_text_contents", {
           nodeId,
           text,
-        });
+        }, { channel });
 
         // Cast the result to a specific type to work with it safely
         interface TextReplaceResult {
@@ -160,14 +162,15 @@ export function registerTextTools(server: McpServer): void {
       nodeId: z.string().describe("The ID of the text node to modify"),
       family: z.string().describe("Font family name"),
       style: z.string().optional().describe("Font style (e.g., 'Regular', 'Bold', 'Italic')"),
+      channel: z.string().optional().describe("Target channel to send the command to (uses active channel if omitted)"),
     },
-    async ({ nodeId, family, style }) => {
+    async ({ nodeId, family, style, channel }) => {
       try {
         const result = await sendCommandToFigma("set_font_name", {
           nodeId,
           family,
           style
-        });
+        }, { channel });
         const typedResult = result as { name: string, fontName: { family: string, style: string } };
         return {
           content: [
@@ -196,10 +199,11 @@ export function registerTextTools(server: McpServer): void {
     "Batch fix misnamed fonts in a subtree. Auto-capture creates wrong font families like 'Rund Display Medium' instead of family 'Rund Display' with style 'Medium'. This recursively walks all text nodes under the given node and fixes them.",
     {
       nodeId: z.string().describe("The ID of the root node to fix fonts in (e.g., a page frame)"),
+      channel: z.string().optional().describe("Target channel to send the command to (uses active channel if omitted)"),
     },
-    async ({ nodeId }) => {
+    async ({ nodeId, channel }) => {
       try {
-        const result = await sendCommandToFigma("fix_fonts", { nodeId });
+        const result = await sendCommandToFigma("fix_fonts", { nodeId }, { channel });
         const typedResult = result as { fixed: number, skipped: number, errors: number, fixedNodes: Array<{ id: string, name: string, from: string, to: string }>, totalFixedNodes: number };
         const summary = typedResult.fixedNodes.map((n: { id: string, name: string, from: string, to: string }) => `  ${n.id}: "${n.name}" ${n.from} → ${n.to}`).join("\n");
         return {
@@ -230,13 +234,14 @@ export function registerTextTools(server: McpServer): void {
     {
       nodeId: z.string().describe("The ID of the text node to modify"),
       fontSize: z.number().positive().describe("Font size in pixels"),
+      channel: z.string().optional().describe("Target channel to send the command to (uses active channel if omitted)"),
     },
-    async ({ nodeId, fontSize }) => {
+    async ({ nodeId, fontSize, channel }) => {
       try {
         const result = await sendCommandToFigma("set_font_size", {
           nodeId,
           fontSize
-        });
+        }, { channel });
         const typedResult = result as { name: string, fontSize: number };
         return {
           content: [
@@ -266,13 +271,14 @@ export function registerTextTools(server: McpServer): void {
     {
       nodeId: z.string().describe("The ID of the text node to modify"),
       weight: z.number().describe("Font weight (100, 200, 300, 400, 500, 600, 700, 800, 900)"),
+      channel: z.string().optional().describe("Target channel to send the command to (uses active channel if omitted)"),
     },
-    async ({ nodeId, weight }) => {
+    async ({ nodeId, weight, channel }) => {
       try {
         const result = await sendCommandToFigma("set_font_weight", {
           nodeId,
           weight
-        });
+        }, { channel });
         const typedResult = result as { name: string, fontName: { family: string, style: string }, weight: number };
         return {
           content: [
@@ -303,14 +309,15 @@ export function registerTextTools(server: McpServer): void {
       nodeId: z.string().describe("The ID of the text node to modify"),
       letterSpacing: z.number().describe("Letter spacing value"),
       unit: z.enum(["PIXELS", "PERCENT"]).optional().describe("Unit type (PIXELS or PERCENT)"),
+      channel: z.string().optional().describe("Target channel to send the command to (uses active channel if omitted)"),
     },
-    async ({ nodeId, letterSpacing, unit }) => {
+    async ({ nodeId, letterSpacing, unit, channel }) => {
       try {
         const result = await sendCommandToFigma("set_letter_spacing", {
           nodeId,
           letterSpacing,
           unit: unit || "PIXELS"
-        });
+        }, { channel });
         const typedResult = result as { name: string, letterSpacing: { value: number, unit: string } };
         return {
           content: [
@@ -341,14 +348,15 @@ export function registerTextTools(server: McpServer): void {
       nodeId: z.string().describe("The ID of the text node to modify"),
       lineHeight: z.number().describe("Line height value"),
       unit: z.enum(["PIXELS", "PERCENT", "AUTO"]).optional().describe("Unit type (PIXELS, PERCENT, or AUTO)"),
+      channel: z.string().optional().describe("Target channel to send the command to (uses active channel if omitted)"),
     },
-    async ({ nodeId, lineHeight, unit }) => {
+    async ({ nodeId, lineHeight, unit, channel }) => {
       try {
         const result = await sendCommandToFigma("set_line_height", {
           nodeId,
           lineHeight,
           unit: unit || "PIXELS"
-        });
+        }, { channel });
         const typedResult = result as { name: string, lineHeight: { value: number, unit: string } };
         return {
           content: [
@@ -378,13 +386,14 @@ export function registerTextTools(server: McpServer): void {
     {
       nodeId: z.string().describe("The ID of the text node to modify"),
       paragraphSpacing: z.number().describe("Paragraph spacing value in pixels"),
+      channel: z.string().optional().describe("Target channel to send the command to (uses active channel if omitted)"),
     },
-    async ({ nodeId, paragraphSpacing }) => {
+    async ({ nodeId, paragraphSpacing, channel }) => {
       try {
         const result = await sendCommandToFigma("set_paragraph_spacing", {
           nodeId,
           paragraphSpacing
-        });
+        }, { channel });
         const typedResult = result as { name: string, paragraphSpacing: number };
         return {
           content: [
@@ -414,13 +423,14 @@ export function registerTextTools(server: McpServer): void {
     {
       nodeId: z.string().describe("The ID of the text node to modify"),
       textCase: z.enum(["ORIGINAL", "UPPER", "LOWER", "TITLE"]).describe("Text case type"),
+      channel: z.string().optional().describe("Target channel to send the command to (uses active channel if omitted)"),
     },
-    async ({ nodeId, textCase }) => {
+    async ({ nodeId, textCase, channel }) => {
       try {
         const result = await sendCommandToFigma("set_text_case", {
           nodeId,
           textCase
-        });
+        }, { channel });
         const typedResult = result as { name: string, textCase: string };
         return {
           content: [
@@ -450,13 +460,14 @@ export function registerTextTools(server: McpServer): void {
     {
       nodeId: z.string().describe("The ID of the text node to modify"),
       textDecoration: z.enum(["NONE", "UNDERLINE", "STRIKETHROUGH"]).describe("Text decoration type"),
+      channel: z.string().optional().describe("Target channel to send the command to (uses active channel if omitted)"),
     },
-    async ({ nodeId, textDecoration }) => {
+    async ({ nodeId, textDecoration, channel }) => {
       try {
         const result = await sendCommandToFigma("set_text_decoration", {
           nodeId,
           textDecoration
-        });
+        }, { channel });
         const typedResult = result as { name: string, textDecoration: string };
         return {
           content: [
@@ -497,13 +508,14 @@ export function registerTextTools(server: McpServer): void {
         "lineHeight", 
         "fontWeight"
       ]).describe("The style property to analyze segments by"),
+      channel: z.string().optional().describe("Target channel to send the command to (uses active channel if omitted)"),
     },
-    async ({ nodeId, property }) => {
+    async ({ nodeId, property, channel }) => {
       try {
         const result = await sendCommandToFigma("get_styled_text_segments", {
           nodeId,
           property
-        });
+        }, { channel });
         
         return {
           content: [
@@ -533,13 +545,14 @@ export function registerTextTools(server: McpServer): void {
     {
       nodeId: z.string().describe("The ID of the text node to modify"),
       textStyleId: z.string().describe("The ID of the text style to apply"),
+      channel: z.string().optional().describe("Target channel to send the command to (uses active channel if omitted)"),
     },
-    async ({ nodeId, textStyleId }) => {
+    async ({ nodeId, textStyleId, channel }) => {
       try {
         const result = await sendCommandToFigma("set_text_style_id", {
           nodeId,
           textStyleId
-        });
+        }, { channel });
         const typedResult = result as { name: string, textStyleId: string, styleName: string };
         return {
           content: [
@@ -569,13 +582,14 @@ export function registerTextTools(server: McpServer): void {
     {
       family: z.string().describe("Font family name"),
       style: z.string().optional().describe("Font style (e.g., 'Regular', 'Bold', 'Italic')"),
+      channel: z.string().optional().describe("Target channel to send the command to (uses active channel if omitted)"),
     },
-    async ({ family, style }) => {
+    async ({ family, style, channel }) => {
       try {
         const result = await sendCommandToFigma("load_font_async", {
           family,
           style: style || "Regular"
-        });
+        }, { channel });
         const typedResult = result as { success: boolean, family: string, style: string, message: string };
         return {
           content: [
@@ -606,14 +620,15 @@ export function registerTextTools(server: McpServer): void {
       nodeId: z.string().describe("The ID of the text node to modify"),
       textAlignHorizontal: z.enum(["LEFT", "CENTER", "RIGHT", "JUSTIFIED"]).optional().describe("Horizontal text alignment (LEFT, CENTER, RIGHT, JUSTIFIED). Use RIGHT for Arabic/RTL text."),
       textAlignVertical: z.enum(["TOP", "CENTER", "BOTTOM"]).optional().describe("Vertical text alignment (TOP, CENTER, BOTTOM)"),
+      channel: z.string().optional().describe("Target channel to send the command to (uses active channel if omitted)"),
     },
-    async ({ nodeId, textAlignHorizontal, textAlignVertical }) => {
+    async ({ nodeId, textAlignHorizontal, textAlignVertical, channel }) => {
       try {
         const result = await sendCommandToFigma("set_text_align", {
           nodeId,
           textAlignHorizontal,
           textAlignVertical
-        });
+        }, { channel });
         const typedResult = result as { name: string, textAlignHorizontal: string, textAlignVertical: string };
         return {
           content: [

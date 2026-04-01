@@ -20,8 +20,9 @@ export function registerModificationTools(server: McpServer): void {
       g: z.number().min(0).max(1).describe("Green component (0-1)"),
       b: z.number().min(0).max(1).describe("Blue component (0-1)"),
       a: z.number().min(0).max(1).optional().describe("Alpha component (0-1, defaults to 1 if not specified)"),
+      channel: z.string().optional().describe("Target channel to send the command to (uses active channel if omitted)"),
     },
-    async ({ nodeId, r, g, b, a }) => {
+    async ({ nodeId, r, g, b, a, channel }) => {
       try {
         // Additional validation: Ensure RGB values are provided (they should not be undefined)
         if (r === undefined || g === undefined || b === undefined) {
@@ -35,7 +36,7 @@ export function registerModificationTools(server: McpServer): void {
         const result = await sendCommandToFigma("set_fill_color", {
           nodeId,
           color: colorWithDefaults,
-        });
+        }, { channel });
         const typedResult = result as { name: string };
         return {
           content: [
@@ -69,8 +70,9 @@ export function registerModificationTools(server: McpServer): void {
       b: z.number().min(0).max(1).describe("Blue component (0-1)"),
       a: z.number().min(0).max(1).optional().describe("Alpha component (0-1)"),
       strokeWeight: z.number().min(0).optional().describe("Stroke weight >= 0)"),
+      channel: z.string().optional().describe("Target channel to send the command to (uses active channel if omitted)"),
     },
-    async ({ nodeId, r, g, b, a, strokeWeight }) => {
+    async ({ nodeId, r, g, b, a, strokeWeight, channel }) => {
       try {
 
         if (r === undefined || g === undefined || b === undefined) {
@@ -86,7 +88,7 @@ export function registerModificationTools(server: McpServer): void {
           nodeId,
           color: colorWithDefaults,
           strokeWeight: strokeWeightWithDefault,
-        });
+        }, { channel });
         const typedResult = result as { name: string };
         return {
           content: [
@@ -119,8 +121,9 @@ export function registerModificationTools(server: McpServer): void {
       g: z.number().min(0).max(1).describe("Green component (0-1)"),
       b: z.number().min(0).max(1).describe("Blue component (0-1)"),
       a: z.number().min(0).max(1).optional().describe("Alpha component (0-1, defaults to 1)"),
+      channel: z.string().optional().describe("Target channel to send the command to (uses active channel if omitted)"),
     },
-    async ({ nodeId, r, g, b, a }) => {
+    async ({ nodeId, r, g, b, a, channel }) => {
       try {
         if (r === undefined || g === undefined || b === undefined) {
           throw new Error("RGB components (r, g, b) are required");
@@ -134,7 +137,7 @@ export function registerModificationTools(server: McpServer): void {
           g: colorWithDefaults.g,
           b: colorWithDefaults.b,
           a: colorWithDefaults.a,
-        });
+        }, { channel });
         const typedResult = result as { name: string; nodesChanged: number };
         return {
           content: [
@@ -165,10 +168,11 @@ export function registerModificationTools(server: McpServer): void {
       nodeId: z.string().describe("The ID of the node to move"),
       x: z.number().describe("New X position (local coordinates, relative to parent)"),
       y: z.number().describe("New Y position (local coordinates, relative to parent)"),
+      channel: z.string().optional().describe("Target channel to send the command to (uses active channel if omitted)"),
     },
-    async ({ nodeId, x, y }) => {
+    async ({ nodeId, x, y, channel }) => {
       try {
-        const result = await sendCommandToFigma("move_node", { nodeId, x, y });
+        const result = await sendCommandToFigma("move_node", { nodeId, x, y }, { channel });
         const typedResult = result as { name: string };
         return {
           content: [
@@ -199,14 +203,15 @@ export function registerModificationTools(server: McpServer): void {
       nodeId: z.string().describe("The ID of the node to resize"),
       width: z.number().positive().describe("New width"),
       height: z.number().positive().describe("New height"),
+      channel: z.string().optional().describe("Target channel to send the command to (uses active channel if omitted)"),
     },
-    async ({ nodeId, width, height }) => {
+    async ({ nodeId, width, height, channel }) => {
       try {
         const result = await sendCommandToFigma("resize_node", {
           nodeId,
           width,
           height,
-        });
+        }, { channel });
         const typedResult = result as { name: string };
         return {
           content: [
@@ -235,10 +240,11 @@ export function registerModificationTools(server: McpServer): void {
     "Delete a node from Figma",
     {
       nodeId: z.string().describe("The ID of the node to delete"),
+      channel: z.string().optional().describe("Target channel to send the command to (uses active channel if omitted)"),
     },
-    async ({ nodeId }) => {
+    async ({ nodeId, channel }) => {
       try {
-        await sendCommandToFigma("delete_node", { nodeId });
+        await sendCommandToFigma("delete_node", { nodeId }, { channel });
         return {
           content: [
             {
@@ -274,14 +280,15 @@ export function registerModificationTools(server: McpServer): void {
         .describe(
           "Optional array of 4 booleans to specify which corners to round [topLeft, topRight, bottomRight, bottomLeft]"
         ),
+      channel: z.string().optional().describe("Target channel to send the command to (uses active channel if omitted)"),
     },
-    async ({ nodeId, radius, corners }) => {
+    async ({ nodeId, radius, corners, channel }) => {
       try {
         const result = await sendCommandToFigma("set_corner_radius", {
           nodeId,
           radius,
           corners: corners || [true, true, true, true],
-        });
+        }, { channel });
         const typedResult = result as { name: string };
         return {
           content: [
@@ -319,10 +326,11 @@ export function registerModificationTools(server: McpServer): void {
       primaryAxisAlignItems: z.enum(["MIN", "CENTER", "MAX", "SPACE_BETWEEN"]).optional().describe("Alignment along primary axis"),
       counterAxisAlignItems: z.enum(["MIN", "CENTER", "MAX"]).optional().describe("Alignment along counter axis"),
       layoutWrap: z.enum(["WRAP", "NO_WRAP"]).optional().describe("Whether items wrap to new lines"),
-      strokesIncludedInLayout: z.boolean().optional().describe("Whether strokes are included in layout calculations")
+      strokesIncludedInLayout: z.boolean().optional().describe("Whether strokes are included in layout calculations"),
+      channel: z.string().optional().describe("Target channel to send the command to (uses active channel if omitted)"),
     },
     async ({ nodeId, layoutMode, paddingTop, paddingBottom, paddingLeft, paddingRight,
-             itemSpacing, primaryAxisAlignItems, counterAxisAlignItems, layoutWrap, strokesIncludedInLayout }) => {
+             itemSpacing, primaryAxisAlignItems, counterAxisAlignItems, layoutWrap, strokesIncludedInLayout, channel }) => {
       try {
         const result = await sendCommandToFigma("set_auto_layout", {
           nodeId,
@@ -336,7 +344,7 @@ export function registerModificationTools(server: McpServer): void {
           counterAxisAlignItems,
           layoutWrap,
           strokesIncludedInLayout
-        });
+        }, { channel });
 
         const typedResult = result as { name: string };
         return {
@@ -384,14 +392,15 @@ export function registerModificationTools(server: McpServer): void {
           visible: z.boolean().optional().describe("Whether the effect is visible"),
           blendMode: z.string().optional().describe("Blend mode")
         })
-      ).describe("Array of effects to apply")
+      ).describe("Array of effects to apply"),
+      channel: z.string().optional().describe("Target channel to send the command to (uses active channel if omitted)"),
     },
-    async ({ nodeId, effects }) => {
+    async ({ nodeId, effects, channel }) => {
       try {
         const result = await sendCommandToFigma("set_effects", {
           nodeId,
           effects
-        });
+        }, { channel });
 
         const typedResult = result as { name: string, effects: any[] };
 
@@ -422,14 +431,15 @@ export function registerModificationTools(server: McpServer): void {
     "Apply an effect style to a node in Figma",
     {
       nodeId: z.string().describe("The ID of the node to modify"),
-      effectStyleId: z.string().describe("The ID of the effect style to apply")
+      effectStyleId: z.string().describe("The ID of the effect style to apply"),
+      channel: z.string().optional().describe("Target channel to send the command to (uses active channel if omitted)"),
     },
-    async ({ nodeId, effectStyleId }) => {
+    async ({ nodeId, effectStyleId, channel }) => {
       try {
         const result = await sendCommandToFigma("set_effect_style_id", {
           nodeId,
           effectStyleId
-        });
+        }, { channel });
 
         const typedResult = result as { name: string, effectStyleId: string };
 
@@ -462,14 +472,15 @@ export function registerModificationTools(server: McpServer): void {
       nodeId: z.string().describe("The ID of the node to rotate"),
       angle: z.number().describe("Rotation angle in degrees (clockwise)"),
       relative: z.boolean().optional().describe("If true, add angle to current rotation instead of setting absolute value (default: false)"),
+      channel: z.string().optional().describe("Target channel to send the command to (uses active channel if omitted)"),
     },
-    async ({ nodeId, angle, relative }) => {
+    async ({ nodeId, angle, relative, channel }) => {
       try {
         const result = await sendCommandToFigma("rotate_node", {
           nodeId,
           angle,
           relative: relative || false,
-        });
+        }, { channel });
         const typedResult = result as { name: string; rotation: number };
         return {
           content: [
@@ -503,8 +514,9 @@ export function registerModificationTools(server: McpServer): void {
       opacity: z.number().min(0).max(1).optional().describe("Set node opacity (0 = fully transparent, 1 = fully opaque)"),
       layoutSizingHorizontal: z.enum(["FIXED", "HUG", "FILL"]).optional().describe("Set horizontal layout sizing for auto-layout children"),
       layoutSizingVertical: z.enum(["FIXED", "HUG", "FILL"]).optional().describe("Set vertical layout sizing for auto-layout children"),
+      channel: z.string().optional().describe("Target channel to send the command to (uses active channel if omitted)"),
     },
-    async ({ nodeId, visible, locked, opacity, layoutSizingHorizontal, layoutSizingVertical }) => {
+    async ({ nodeId, visible, locked, opacity, layoutSizingHorizontal, layoutSizingVertical, channel }) => {
       try {
         const result = await sendCommandToFigma("set_node_properties", {
           nodeId,
@@ -513,7 +525,7 @@ export function registerModificationTools(server: McpServer): void {
           opacity,
           layoutSizingHorizontal,
           layoutSizingVertical,
-        });
+        }, { channel });
         const typedResult = result as { name: string; visible: boolean; locked: boolean; opacity: number };
         const changes: string[] = [];
         if (visible !== undefined) changes.push(`visible=${typedResult.visible}`);
@@ -548,14 +560,15 @@ export function registerModificationTools(server: McpServer): void {
       nodeId: z.string().describe("The ID of the node to reorder"),
       position: z.enum(["front", "back", "forward", "backward"]).optional().describe("Move to front/back or one step forward/backward"),
       index: z.number().optional().describe("Direct index position within parent's children (0 = bottom). Overrides position if both provided."),
+      channel: z.string().optional().describe("Target channel to send the command to (uses active channel if omitted)"),
     },
-    async ({ nodeId, position, index }) => {
+    async ({ nodeId, position, index, channel }) => {
       try {
         const result = await sendCommandToFigma("reorder_node", {
           nodeId,
           position,
           index,
-        });
+        }, { channel });
         const typedResult = result as { name: string; newIndex: number; parentChildCount: number };
         return {
           content: [
@@ -584,10 +597,11 @@ export function registerModificationTools(server: McpServer): void {
     "Convert a group or shape node into a frame in Figma. Preserves position, size, visual properties, and children. Useful for converting groups into auto-layout-capable frames.",
     {
       nodeId: z.string().describe("The ID of the node to convert to a frame"),
+      channel: z.string().optional().describe("Target channel to send the command to (uses active channel if omitted)"),
     },
-    async ({ nodeId }) => {
+    async ({ nodeId, channel }) => {
       try {
-        const result = await sendCommandToFigma("convert_to_frame", { nodeId });
+        const result = await sendCommandToFigma("convert_to_frame", { nodeId }, { channel });
         const typedResult = result as { id: string; name: string; originalType: string; childCount: number };
         return {
           content: [
@@ -627,8 +641,9 @@ export function registerModificationTools(server: McpServer): void {
         }),
       })).min(2).describe("Array of gradient color stops (minimum 2)"),
       gradientTransform: z.array(z.array(z.number())).optional().describe("2x3 affine transform matrix [[a,b,tx],[c,d,ty]]. Defaults to left-to-right linear: [[1,0,0],[0,1,0]]"),
+      channel: z.string().optional().describe("Target channel to send the command to (uses active channel if omitted)"),
     },
-    async ({ nodeId, type, stops, gradientTransform }) => {
+    async ({ nodeId, type, stops, gradientTransform, channel }) => {
       try {
         const result = await sendCommandToFigma("set_gradient", {
           nodeId,
@@ -638,7 +653,7 @@ export function registerModificationTools(server: McpServer): void {
             color: { r: s.color.r, g: s.color.g, b: s.color.b, a: s.color.a ?? 1 },
           })),
           gradientTransform: gradientTransform || [[1, 0, 0], [0, 1, 0]],
-        });
+        }, { channel });
         const typedResult = result as { name: string };
         return {
           content: [
@@ -669,14 +684,15 @@ export function registerModificationTools(server: McpServer): void {
       nodeId: z.string().describe("The ID of the node to apply the image fill to"),
       imageData: z.string().max(7_000_000).describe("Base64-encoded image data (PNG, JPEG, GIF, or WebP). Max ~5MB after decode."),
       scaleMode: z.enum(["FILL", "FIT", "CROP", "TILE"]).optional().describe("How the image is scaled within the node (default: FILL)"),
+      channel: z.string().optional().describe("Target channel to send the command to (uses active channel if omitted)"),
     },
-    async ({ nodeId, imageData, scaleMode }) => {
+    async ({ nodeId, imageData, scaleMode, channel }) => {
       try {
         const result = await sendCommandToFigma("set_image", {
           nodeId,
           imageData,
           scaleMode: scaleMode || "FILL",
-        });
+        }, { channel });
         const typedResult = result as { name: string; imageHash: string };
         return {
           content: [
@@ -721,11 +737,12 @@ export function registerModificationTools(server: McpServer): void {
             a: z.number().min(0).max(1).describe("Alpha (0-1)")
           }).optional().describe("Grid color")
         })
-      ).describe("Array of layout grids to apply")
+      ).describe("Array of layout grids to apply"),
+      channel: z.string().optional().describe("Target channel to send the command to (uses active channel if omitted)"),
     },
-    async ({ nodeId, grids }) => {
+    async ({ nodeId, grids, channel }) => {
       try {
-        const result = await sendCommandToFigma("set_grid", { nodeId, grids });
+        const result = await sendCommandToFigma("set_grid", { nodeId, grids }, { channel });
         const typedResult = result as { name: string; gridCount: number };
         return {
           content: [
@@ -754,10 +771,11 @@ export function registerModificationTools(server: McpServer): void {
     "Read layout grids from a frame node in Figma",
     {
       nodeId: z.string().describe("The ID of the frame node to read grids from"),
+      channel: z.string().optional().describe("Target channel to send the command to (uses active channel if omitted)"),
     },
-    async ({ nodeId }) => {
+    async ({ nodeId, channel }) => {
       try {
-        const result = await sendCommandToFigma("get_grid", { nodeId });
+        const result = await sendCommandToFigma("get_grid", { nodeId }, { channel });
         const typedResult = result as { name: string; grids: any[] };
         return {
           content: [
@@ -791,11 +809,12 @@ export function registerModificationTools(server: McpServer): void {
           axis: z.enum(["X", "Y"]).describe("Guide axis: X for vertical, Y for horizontal"),
           offset: z.number().describe("Offset position of the guide in pixels")
         })
-      ).describe("Array of guides to set on the page")
+      ).describe("Array of guides to set on the page"),
+      channel: z.string().optional().describe("Target channel to send the command to (uses active channel if omitted)"),
     },
-    async ({ pageId, guides }) => {
+    async ({ pageId, guides, channel }) => {
       try {
-        const result = await sendCommandToFigma("set_guide", { pageId, guides });
+        const result = await sendCommandToFigma("set_guide", { pageId, guides }, { channel });
         const typedResult = result as { name: string; guideCount: number };
         return {
           content: [
@@ -824,10 +843,11 @@ export function registerModificationTools(server: McpServer): void {
     "Read guides from a page in Figma",
     {
       pageId: z.string().describe("The ID of the page to read guides from"),
+      channel: z.string().optional().describe("Target channel to send the command to (uses active channel if omitted)"),
     },
-    async ({ pageId }) => {
+    async ({ pageId, channel }) => {
       try {
-        const result = await sendCommandToFigma("get_guide", { pageId });
+        const result = await sendCommandToFigma("get_guide", { pageId }, { channel });
         const typedResult = result as { name: string; guides: any[] };
         return {
           content: [
@@ -857,10 +877,11 @@ export function registerModificationTools(server: McpServer): void {
     {
       nodeId: z.string().describe("The ID of the node to annotate"),
       label: z.string().describe("The annotation label text"),
+      channel: z.string().optional().describe("Target channel to send the command to (uses active channel if omitted)"),
     },
-    async ({ nodeId, label }) => {
+    async ({ nodeId, label, channel }) => {
       try {
-        const result = await sendCommandToFigma("set_annotation", { nodeId, label });
+        const result = await sendCommandToFigma("set_annotation", { nodeId, label }, { channel });
         const typedResult = result as { name: string; annotationCount: number };
         return {
           content: [
@@ -889,10 +910,11 @@ export function registerModificationTools(server: McpServer): void {
     "Read annotations from a node in Figma. Uses the proposed Annotations API.",
     {
       nodeId: z.string().describe("The ID of the node to read annotations from"),
+      channel: z.string().optional().describe("Target channel to send the command to (uses active channel if omitted)"),
     },
-    async ({ nodeId }) => {
+    async ({ nodeId, channel }) => {
       try {
-        const result = await sendCommandToFigma("get_annotation", { nodeId });
+        const result = await sendCommandToFigma("get_annotation", { nodeId }, { channel });
         const typedResult = result as { name: string; annotations: any[] };
         return {
           content: [
@@ -922,13 +944,14 @@ export function registerModificationTools(server: McpServer): void {
     {
       nodeId: z.string().describe("The ID of the node to rename"),
       name: z.string().describe("The new name for the node"),
+      channel: z.string().optional().describe("Target channel to send the command to (uses active channel if omitted)"),
     },
-    async ({ nodeId, name }) => {
+    async ({ nodeId, name, channel }) => {
       try {
         const result = await sendCommandToFigma("rename_node", {
           nodeId,
           name,
-        });
+        }, { channel });
         const typedResult = result as { id: string; name: string; oldName: string; type: string };
         return {
           content: [
