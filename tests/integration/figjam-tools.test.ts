@@ -54,7 +54,7 @@ describe("get_figjam_elements tool", () => {
 
     const result = await call("get_figjam_elements");
 
-    expect(mockSendCommand).toHaveBeenCalledWith("get_figjam_elements", {});
+    expect(mockSendCommand).toHaveBeenCalledWith("get_figjam_elements", {}, { channel: undefined });
     expect(result.content[0].text).toContain("stickies");
   });
 
@@ -184,7 +184,7 @@ describe("set_sticky_text tool", () => {
     expect(mockSendCommand).toHaveBeenCalledWith("set_sticky_text", {
       nodeId: "5:1",
       text: "Updated",
-    });
+    }, { channel: undefined });
   });
 
   it("rejects missing nodeId", async () => {

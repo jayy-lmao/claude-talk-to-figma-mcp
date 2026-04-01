@@ -18,7 +18,7 @@ describe('compound tools', () => {
     );
 
     mockSendCommand = require('../../src/talk_to_figma_mcp/utils/websocket').sendCommandToFigma;
-    mockSendCommand.mockClear();
+    mockSendCommand.mockReset();
     mockSendCommand.mockResolvedValue({ name: 'MockNode', id: 'mock-id-1' });
 
     const originalTool = server.tool.bind(server);
@@ -761,8 +761,8 @@ describe('compound tools', () => {
       });
 
       expect(mockSendCommand).toHaveBeenCalledTimes(2);
-      expect(mockSendCommand.mock.calls[0]).toEqual(['set_text_content', { nodeId: 'n1', text: 'Hello' }]);
-      expect(mockSendCommand.mock.calls[1]).toEqual(['set_text_content', { nodeId: 'n2', text: 'World' }]);
+      expect(mockSendCommand.mock.calls[0]).toEqual(['set_text_content', { nodeId: 'n1', text: 'Hello' }, { channel: undefined }]);
+      expect(mockSendCommand.mock.calls[1]).toEqual(['set_text_content', { nodeId: 'n2', text: 'World' }, { channel: undefined }]);
     });
 
     it('reports successes in the result text', async () => {
@@ -830,10 +830,12 @@ describe('compound tools', () => {
       expect(mockSendCommand.mock.calls[0]).toEqual([
         'set_instance_variant',
         { nodeId: 'btn-1', properties: { State: 'Hover' } },
+        { channel: undefined },
       ]);
       expect(mockSendCommand.mock.calls[1]).toEqual([
         'set_instance_variant',
         { nodeId: 'btn-2', properties: { State: 'Disabled', Size: 'Large' } },
+        { channel: undefined },
       ]);
     });
 
@@ -899,32 +901,28 @@ describe('compound tools', () => {
     it('creates a frame then instances for each component', async () => {
       mockSendCommand
         .mockResolvedValueOnce({ name: 'Home Screen', id: 'frame-1' }) // create_frame
-        .mockResolvedValueOnce({ name: 'Nav', id: 'inst-nav' }) // create_component_instance nav
-        .mockResolvedValueOnce({}) // insert_child nav
-        .mockResolvedValueOnce({ name: 'Hero', id: 'inst-hero' }) // create_component_instance hero
-        .mockResolvedValueOnce({}); // insert_child hero
+        .mockResolvedValueOnce({ name: 'Nav', id: 'inst-nav' }) // create_component_instance nav (parentId passed directly)
+        .mockResolvedValueOnce({ name: 'Hero', id: 'inst-hero' }); // create_component_instance hero (parentId passed directly)
 
       await callTool('build_screen_from_template', baseArgs);
 
       expect(mockSendCommand.mock.calls[0][0]).toBe('create_frame');
       expect(mockSendCommand.mock.calls[1][0]).toBe('create_component_instance');
-      expect(mockSendCommand.mock.calls[2][0]).toBe('insert_child');
-      expect(mockSendCommand.mock.calls[3][0]).toBe('create_component_instance');
-      expect(mockSendCommand.mock.calls[4][0]).toBe('insert_child');
+      expect(mockSendCommand.mock.calls[1][1]).toMatchObject({ parentId: 'frame-1' });
+      expect(mockSendCommand.mock.calls[2][0]).toBe('create_component_instance');
+      expect(mockSendCommand.mock.calls[2][1]).toMatchObject({ parentId: 'frame-1' });
     });
 
-    it('passes the frame ID as parentId to insert_child calls', async () => {
+    it('passes the frame ID as parentId to create_component_instance calls', async () => {
       mockSendCommand
         .mockResolvedValueOnce({ name: 'Home Screen', id: 'frame-abc' })
         .mockResolvedValueOnce({ name: 'Nav', id: 'inst-1' })
-        .mockResolvedValueOnce({})
-        .mockResolvedValueOnce({ name: 'Hero', id: 'inst-2' })
-        .mockResolvedValueOnce({});
+        .mockResolvedValueOnce({ name: 'Hero', id: 'inst-2' });
 
       await callTool('build_screen_from_template', baseArgs);
 
-      expect(mockSendCommand.mock.calls[2][1]).toMatchObject({ parentId: 'frame-abc', childId: 'inst-1' });
-      expect(mockSendCommand.mock.calls[4][1]).toMatchObject({ parentId: 'frame-abc', childId: 'inst-2' });
+      expect(mockSendCommand.mock.calls[1][1]).toMatchObject({ componentKey: 'key-nav', parentId: 'frame-abc' });
+      expect(mockSendCommand.mock.calls[2][1]).toMatchObject({ componentKey: 'key-hero', parentId: 'frame-abc' });
     });
 
     it('passes frame parameters (name, position, size, fill) to create_frame', async () => {
@@ -956,7 +954,7 @@ describe('compound tools', () => {
       mockSendCommand
         .mockResolvedValueOnce({ name: 'Screen', id: 'frame-3' }) // create_frame
         .mockResolvedValueOnce({}) // set_auto_layout
-        .mockResolvedValue({ name: 'Node', id: 'inst-y' });
+        .mockResolvedValue({ name: 'Node', id: 'inst-y' }); // components
 
       await callTool('build_screen_from_template', {
         ...baseArgs,
@@ -965,8 +963,9 @@ describe('compound tools', () => {
         itemSpacing: 8,
       });
 
-      expect(mockSendCommand.mock.calls[1][0]).toBe('set_auto_layout');
-      expect(mockSendCommand.mock.calls[1][1]).toMatchObject({
+      const autoLayoutCall = mockSendCommand.mock.calls.find((c: any[]) => c[0] === 'set_auto_layout');
+      expect(autoLayoutCall).toBeDefined();
+      expect(autoLayoutCall![1]).toMatchObject({
         nodeId: 'frame-3',
         layoutMode: 'VERTICAL',
         paddingTop: 16,
@@ -1017,7 +1016,6 @@ describe('compound tools', () => {
       mockSendCommand
         .mockResolvedValueOnce({ name: 'Screen', id: 'frame-6' })
         .mockResolvedValueOnce({ name: 'Button', id: 'inst-btn2' })
-        .mockResolvedValueOnce({}) // insert_child
         .mockResolvedValueOnce({}); // set_instance_variant
 
       await callTool('build_screen_from_template', {
@@ -1045,7 +1043,6 @@ describe('compound tools', () => {
       mockSendCommand
         .mockResolvedValueOnce({ name: 'Screen', id: 'frame-7' }) // create_frame
         .mockResolvedValueOnce({ name: 'Nav', id: 'inst-nav2' }) // first component OK
-        .mockResolvedValueOnce({}) // insert_child OK
         .mockRejectedValueOnce(new Error('component key not found')); // second fails
 
       const result = await callTool('build_screen_from_template', baseArgs);
@@ -1057,8 +1054,9 @@ describe('compound tools', () => {
 
     it('includes screen name and dimensions in success message', async () => {
       mockSendCommand
-        .mockResolvedValueOnce({ name: 'Home Screen', id: 'frame-8' })
-        .mockResolvedValue({ name: 'Node', id: 'inst-q' });
+        .mockResolvedValueOnce({ name: 'Home Screen', id: 'frame-8' }) // create_frame
+        .mockResolvedValueOnce({ name: 'Nav', id: 'inst-nav3' }) // first component
+        .mockResolvedValueOnce({ name: 'Hero', id: 'inst-hero3' }); // second component
 
       const result = await callTool('build_screen_from_template', baseArgs);
 

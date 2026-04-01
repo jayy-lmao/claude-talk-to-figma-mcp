@@ -26,8 +26,10 @@ export function registerFigJamTools(server: McpServer): void {
   server.tool(
     "get_figjam_elements",
     "Get all FigJam-specific elements (stickies, connectors, shapes with text, sections, stamps) on the current page. Use this to read the contents of a FigJam board.",
-    {},
-    async () => {
+    {
+      channel: z.string().optional().describe("Target channel to send the command to (uses active channel if omitted)"),
+    },
+    async ({ channel }) => {
       try {
         const result = await sendCommandToFigma("get_figjam_elements", {}, { channel });
         return {

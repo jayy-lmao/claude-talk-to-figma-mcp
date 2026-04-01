@@ -6,6 +6,10 @@ jest.mock("../../src/talk_to_figma_mcp/utils/websocket", () => ({
   sendCommandToFigma: jest.fn(),
   joinChannel: jest.fn(),
   getConnectionStatus: jest.fn(),
+  getCurrentChannel: jest.fn().mockReturnValue(null),
+  getJoinedChannels: jest.fn().mockReturnValue(new Set()),
+  setActiveChannel: jest.fn(),
+  leaveChannel: jest.fn(),
 }));
 
 function makeServer() {
@@ -36,32 +40,38 @@ function makeServer() {
 
 describe("get_connection_status tool", () => {
   let handlers: Record<string, Function>;
-  let getConnectionStatus: jest.Mock;
 
   beforeEach(() => {
     jest.resetAllMocks();
     const ws = require("../../src/talk_to_figma_mcp/utils/websocket");
-    getConnectionStatus = ws.getConnectionStatus;
+    ws.getCurrentChannel.mockReturnValue(null);
+    ws.getJoinedChannels.mockReturnValue(new Set());
     ({ handlers } = makeServer());
   });
 
   it("returns connected=true and a channel when connected", async () => {
-    getConnectionStatus.mockReturnValue({ connected: true, channel: "my-channel" });
+    const ws = require("../../src/talk_to_figma_mcp/utils/websocket");
+    ws.getCurrentChannel.mockReturnValue("my-channel");
+    ws.getJoinedChannels.mockReturnValue(new Set(["my-channel"]));
     const result = await handlers["get_connection_status"]({}, { meta: {} });
-    expect(result.content[0].text).toBe(JSON.stringify({ connected: true, channel: "my-channel" }));
+    const parsed = JSON.parse(result.content[0].text);
+    expect(parsed.connected).toBe(true);
+    expect(parsed.activeChannel).toBe("my-channel");
+    expect(parsed.joinedChannels).toContain("my-channel");
   });
 
-  it("returns connected=false and channel=null when disconnected", async () => {
-    getConnectionStatus.mockReturnValue({ connected: false, channel: null });
+  it("returns connected=false when disconnected", async () => {
     const result = await handlers["get_connection_status"]({}, { meta: {} });
     const parsed = JSON.parse(result.content[0].text);
     expect(parsed.connected).toBe(false);
-    expect(parsed.channel).toBeNull();
+    expect(parsed.activeChannel).toBeNull();
+    expect(parsed.joinedChannels).toHaveLength(0);
   });
 
   it("does not call sendCommandToFigma (no network round-trip)", async () => {
     const ws = require("../../src/talk_to_figma_mcp/utils/websocket");
-    getConnectionStatus.mockReturnValue({ connected: true, channel: "test" });
+    ws.getCurrentChannel.mockReturnValue("test");
+    ws.getJoinedChannels.mockReturnValue(new Set(["test"]));
     await handlers["get_connection_status"]({}, { meta: {} });
     expect(ws.sendCommandToFigma).not.toHaveBeenCalled();
   });
@@ -78,7 +88,7 @@ describe("get_document_info tool", () => {
     ({ handlers } = makeServer());
   });
 
-  it("returns a shallow summary with pages and top-level frames", async () => {
+  it("returns the raw document info as JSON", async () => {
     mockSendCommand.mockResolvedValue({
       id: "0:1",
       name: "My Document",
@@ -99,15 +109,9 @@ describe("get_document_info tool", () => {
     const parsed = JSON.parse(result.content[0].text);
     expect(parsed.id).toBe("0:1");
     expect(parsed.name).toBe("My Document");
-    expect(parsed.pages).toHaveLength(1);
-    expect(parsed.pages[0].name).toBe("Page 1");
-    // Top-level frames are included, VECTOR nodes are filtered out
-    const frameTypes = parsed.pages[0].frames.map((f: any) => f.type);
-    expect(frameTypes).toContain("FRAME");
-    expect(frameTypes).not.toContain("VECTOR");
-    // Frames include bounding box but no deep children
-    expect(parsed.pages[0].frames[0].absoluteBoundingBox).toBeDefined();
-    expect(parsed.pages[0].frames[0].children).toBeUndefined();
+    expect(parsed.type).toBe("DOCUMENT");
+    expect(parsed.children).toHaveLength(1);
+    expect(parsed.children[0].name).toBe("Page 1");
   });
 
   it("surfaces errors in the response text", async () => {
@@ -129,7 +133,7 @@ describe("get_selection tool", () => {
     ({ handlers } = makeServer());
   });
 
-  it("filters an array of selected nodes", async () => {
+  it("returns the raw selection as JSON", async () => {
     mockSendCommand.mockResolvedValue([
       {
         id: "2:1",
@@ -140,7 +144,6 @@ describe("get_selection tool", () => {
             type: "SOLID",
             color: { r: 0, g: 0.5, b: 1, a: 1 },
             boundVariables: { color: "var:abc" },
-            imageRef: "img:xyz",
           },
         ],
         children: [],
@@ -149,20 +152,20 @@ describe("get_selection tool", () => {
     const result = await handlers["get_selection"]({}, { meta: {} });
     const parsed = JSON.parse(result.content[0].text);
     expect(Array.isArray(parsed)).toBe(true);
-    expect(parsed[0].fills[0].boundVariables).toBeUndefined();
-    expect(parsed[0].fills[0].imageRef).toBeUndefined();
+    expect(parsed[0].id).toBe("2:1");
+    expect(parsed[0].name).toBe("Button");
   });
 
-  it("filters VECTOR nodes out of the selection array", async () => {
+  it("passes through all node types in selection", async () => {
     mockSendCommand.mockResolvedValue([
       { id: "3:1", name: "Shape", type: "VECTOR" },
       { id: "3:2", name: "Box", type: "RECTANGLE" },
     ]);
     const result = await handlers["get_selection"]({}, { meta: {} });
     const parsed = JSON.parse(result.content[0].text);
-    expect(parsed.every((n: any) => n !== null)).toBe(true);
+    expect(parsed).toHaveLength(2);
     const types = parsed.map((n: any) => n.type);
-    expect(types).not.toContain("VECTOR");
+    expect(types).toContain("VECTOR");
     expect(types).toContain("RECTANGLE");
   });
 

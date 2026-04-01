@@ -121,11 +121,14 @@ export function registerDocumentTools(server: McpServer): void {
     async ({ nodeIds, channel }) => {
       try {
         const results = await sendCommandToFigma('get_nodes_info', { nodeIds }, { channel }) as any[];
+        const filtered = results
+          .map((result) => filterFigmaNode(result.document || result.info || result))
+          .filter((node) => node !== null);
         return {
           content: [
             {
               type: "text",
-              text: JSON.stringify(results.map((result) => filterFigmaNode(result.document || result.info)))
+              text: JSON.stringify(filtered)
             }
           ]
         };
