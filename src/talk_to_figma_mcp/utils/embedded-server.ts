@@ -303,9 +303,6 @@ export function startEmbeddedServer(port: number): Promise<boolean> {
     }
 
     const server = createServer(handleHttpRequest);
-    const wsServer = new WebSocketServer({ server });
-
-    wsServer.on("connection", handleConnection);
 
     server.on("error", (err: NodeJS.ErrnoException) => {
       if (err.code === "EADDRINUSE") {
@@ -318,6 +315,10 @@ export function startEmbeddedServer(port: number): Promise<boolean> {
     });
 
     server.listen(port, () => {
+      // Only create the WebSocketServer after the HTTP server has successfully bound
+      // to avoid unhandled error propagation on EADDRINUSE
+      const wsServer = new WebSocketServer({ server });
+      wsServer.on("connection", handleConnection);
       httpServer = server;
       wss = wsServer;
       logger.info(`[WS-Server] Embedded WebSocket server running on port ${port}`);

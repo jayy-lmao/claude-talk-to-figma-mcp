@@ -1,9 +1,11 @@
 import WebSocket from "ws";
 import { v4 as uuidv4 } from "uuid";
+import { spawn } from "child_process";
+import { existsSync } from "fs";
+import { resolve } from "path";
 import { logger } from "./logger";
 import { serverUrl, defaultPort, WS_URL, reconnectInterval } from "../config/config";
 import { FigmaCommand, CommandProgressUpdate, PendingRequest, ProgressMessage } from "../types";
-import { startEmbeddedServer, isServerRunning } from "./embedded-server";
 
 // WebSocket connection and request tracking
 let ws: WebSocket | null = null;
@@ -14,11 +16,74 @@ let activeChannel: string | null = null;
 const pendingRequests = new Map<string, PendingRequest>();
 
 /**
- * Ensure the WebSocket server is available, starting the embedded one if needed.
- * Then connect as a client. This handles the singleton pattern:
- * - First MCP instance starts the embedded server + connects
- * - Subsequent instances detect EADDRINUSE and just connect
- * - On reconnect after host dies, a surviving instance takes over as server
+ * Check if a WebSocket server is already listening on the given port.
+ */
+async function isServerListening(port: number): Promise<boolean> {
+  return new Promise((resolve) => {
+    const testWs = new WebSocket(`ws://localhost:${port}`);
+    const timeout = setTimeout(() => {
+      testWs.terminate();
+      resolve(false);
+    }, 2000);
+    testWs.on("open", () => {
+      clearTimeout(timeout);
+      testWs.close();
+      resolve(true);
+    });
+    testWs.on("error", () => {
+      clearTimeout(timeout);
+      resolve(false);
+    });
+  });
+}
+
+/**
+ * Spawn the standalone WebSocket server as a detached process.
+ * The server will outlive this MCP process and auto-exit when idle.
+ */
+function spawnStandaloneServer(port: number): void {
+  // Resolve the standalone server script path relative to this file's location.
+  // In the bundled output, the standalone server is a sibling file.
+  let scriptPath: string;
+
+  // Try CJS bundle path first (dist/talk_to_figma_mcp/standalone-server.cjs)
+  const cjsPath = resolve(__dirname, "standalone-server.cjs");
+  const esmPath = resolve(__dirname, "standalone-server.mjs");
+  const jsPath = resolve(__dirname, "standalone-server.js");
+
+  if (existsSync(cjsPath)) {
+    scriptPath = cjsPath;
+  } else if (existsSync(esmPath)) {
+    scriptPath = esmPath;
+  } else if (existsSync(jsPath)) {
+    scriptPath = jsPath;
+  } else {
+    // Fallback: try resolving from source layout
+    scriptPath = resolve(__dirname, "../standalone-server.cjs");
+    if (!existsSync(scriptPath)) {
+      logger.error(`Cannot find standalone-server script. Looked in: ${__dirname}`);
+      return;
+    }
+  }
+
+  logger.info(`Spawning standalone WebSocket server: ${scriptPath}`);
+
+  const child = spawn("node", [scriptPath, `--port=${port}`], {
+    detached: true,
+    stdio: "ignore",
+  });
+
+  child.unref();
+  logger.info(`Standalone server spawned (pid ${child.pid})`);
+}
+
+/**
+ * Ensure the WebSocket server is available, spawning a standalone one if needed.
+ * Then connect as a client.
+ *
+ * - If a server is already listening on the port, just connect.
+ * - If not, spawn a detached standalone server and connect.
+ * - The standalone server outlives any individual MCP session.
  */
 export async function connectToFigma(port: number = defaultPort) {
   // If already connected, do nothing
@@ -39,13 +104,15 @@ export async function connectToFigma(port: number = defaultPort) {
     ws = null;
   }
 
-  // Try to start the embedded server (no-op if port is taken or already running)
-  if (!isServerRunning()) {
-    const started = await startEmbeddedServer(port);
-    if (started) {
-      logger.info('This instance is hosting the WebSocket server');
+  // Ensure a standalone WebSocket server is running (only for localhost)
+  if (serverUrl === 'localhost') {
+    const listening = await isServerListening(port);
+    if (listening) {
+      logger.info('Standalone WebSocket server already running');
     } else {
-      logger.info('Another instance is hosting the WebSocket server');
+      spawnStandaloneServer(port);
+      // Give it a moment to start
+      await new Promise((r) => setTimeout(r, 1000));
     }
   }
 
