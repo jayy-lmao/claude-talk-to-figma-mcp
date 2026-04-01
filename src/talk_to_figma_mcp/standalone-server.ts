@@ -38,6 +38,7 @@ interface FigmaSession {
   channel: string;
   documentName: string;
   pageName: string;
+  fileKey: string | null;
   registeredAt: number;
   lastHeartbeat: number;
   clientId: string;
@@ -158,6 +159,7 @@ function handleConnection(ws: WebSocket) {
             channel: channelName,
             documentName: metadata.documentName || "Unknown",
             pageName: metadata.pageName || "Unknown",
+            fileKey: metadata.fileKey || sessions.get(channelName)?.fileKey || null,
             registeredAt: sessions.get(channelName)?.registeredAt || now,
             lastHeartbeat: now,
             clientId: cid,
@@ -256,6 +258,7 @@ function handleHttpRequest(req: IncomingMessage, res: ServerResponse) {
       channel: s.channel,
       documentName: s.documentName,
       pageName: s.pageName,
+      fileKey: s.fileKey,
       registeredAt: s.registeredAt,
       lastHeartbeat: s.lastHeartbeat,
     }));

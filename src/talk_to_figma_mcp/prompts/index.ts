@@ -198,6 +198,13 @@ Work with FigJam whiteboard elements.
 - create_connector — Arrows between nodes (ELBOWED/STRAIGHT/CURVED)
 - create_section — Grouping sections
 
+### Search & Discovery
+Find nodes across the document efficiently.
+- find_nodes — Search by name, text content, component type, annotations, or node type. Supports currentPage or allPages scope with pagination
+- find_nodes_all_channels — Same filters as find_nodes but searches across ALL joined Figma files
+
+**Important:** To find all annotated nodes, use \`find_nodes\` with \`hasAnnotations: true\` instead of manually iterating nodes with \`get_annotation\`. Use \`annotationLabel\` to filter by annotation text.
+
 ### Prototyping
 Create interactive prototype flows.
 - get_reactions / add_reaction / add_back_reaction / add_url_reaction / remove_reactions
@@ -751,7 +758,7 @@ set_annotation
   nodeId (string, required)
   label (string, required)
 
-get_annotation
+get_annotation — Read annotations from a single node. To discover all annotated nodes, use find_nodes with hasAnnotations: true instead.
   nodeId (string, required)
 
 ## Text Tools
@@ -1075,6 +1082,23 @@ build_screen_from_template — Create artboard + populate with component instanc
     name (string, optional)
     componentProperties (Record<string, string|boolean>, optional)
     variantProperties (Record<string, string>, optional)
+
+## Search Tools
+
+find_nodes — Search for nodes by name, text, component, annotations, or type. Use this to discover annotated nodes instead of manually iterating with get_annotation.
+  scope (enum: currentPage/allPages, default: currentPage)
+  nodeTypes (array, optional) — e.g. ["FRAME", "TEXT", "INSTANCE"]
+  name (string, optional) — Substring match (case-insensitive)
+  nameRegex (string, optional) — Regex match (case-insensitive)
+  textContent (string, optional) — Match TEXT node characters
+  componentName (string, optional) — Match INSTANCE by component name
+  hasAnnotations (boolean, optional) — Find nodes with annotations
+  annotationLabel (string, optional) — Substring match on annotation text
+  limit (number, default: 100)
+  offset (number, default: 0)
+
+find_nodes_all_channels — Same as find_nodes but searches across ALL joined Figma files.
+  (same parameters as find_nodes, no channel param)
 
 ## Note on Channel Parameter
 

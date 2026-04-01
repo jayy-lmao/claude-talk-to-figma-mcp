@@ -907,7 +907,7 @@ export function registerModificationTools(server: McpServer): void {
   // Get Annotation Tool
   server.tool(
     "get_annotation",
-    "Read annotations from a node in Figma. Uses the proposed Annotations API.",
+    "Read annotations from a single node in Figma. Uses the proposed Annotations API. Tip: To discover all annotated nodes, use find_nodes with hasAnnotations: true instead of iterating nodes manually.",
     {
       nodeId: z.string().describe("The ID of the node to read annotations from"),
       channel: z.string().optional().describe("Target channel to send the command to (uses active channel if omitted)"),

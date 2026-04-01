@@ -18,5 +18,5 @@
   },
   "documentAccess": "dynamic-page",
   "enableProposedApi": false,
-  "enablePrivatePluginApi": false
+  "enablePrivatePluginApi": true
 }

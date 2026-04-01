@@ -80,6 +80,7 @@ figma.on("run", ({ command }) => {
     metadata: {
       documentName: figma.root.name,
       pageName: figma.currentPage.name,
+      fileKey: figma.fileKey || null,
     },
   });
 });
@@ -91,6 +92,7 @@ figma.on("currentpagechange", () => {
     metadata: {
       documentName: figma.root.name,
       pageName: figma.currentPage.name,
+      fileKey: figma.fileKey || null,
     },
   });
 });
@@ -365,6 +367,7 @@ async function getDocumentInfo() {
   await figma.currentPage.loadAsync();
   const page = figma.currentPage;
   return {
+    fileKey: figma.fileKey || null,
     name: page.name,
     id: page.id,
     type: page.type,
@@ -3338,10 +3341,19 @@ async function setTextStyleId(params) {
       console.log(`Fetching text styles to validate style ID: ${textStyleId}`);
       const textStyles = await figma.getLocalTextStylesAsync();
       // Look for the style by ID or by Key (LLMs often pass the key which is a cleaner hex string)
-      const foundStyle = textStyles.find(style => style.id === textStyleId || style.key === textStyleId);
+      let foundStyle = textStyles.find(style => style.id === textStyleId || style.key === textStyleId);
+
+      // If not found locally, try importing from a library by key
+      if (!foundStyle) {
+        try {
+          foundStyle = await figma.importStyleByKeyAsync(textStyleId);
+        } catch (e) {
+          // importStyleByKeyAsync throws if key is invalid
+        }
+      }
 
       if (!foundStyle) {
-        throw new Error(`Text style with ID "${textStyleId}" not found. Make sure the style exists in your local styles.`);
+        throw new Error(`Text style with ID "${textStyleId}" not found in local or library styles.`);
       }
 
       // Ensure we use the full Figma ID for applying the style
@@ -5935,6 +5947,18 @@ async function setVariable(params) {
 }
 
 // Apply a variable binding to a node property
+async function resolveVariable(variableId) {
+  let variable = await figma.variables.getVariableByIdAsync(variableId);
+  if (!variable) {
+    try {
+      variable = await figma.variables.importVariableByKeyAsync(variableId);
+    } catch (e) {
+      // importVariableByKeyAsync throws if key is invalid
+    }
+  }
+  return variable;
+}
+
 async function applyVariableToNode(params) {
   const { nodeId, variableId, field } = params || {};
 
@@ -5959,9 +5983,9 @@ async function applyVariableToNode(params) {
     throw new Error(`Node not found with ID: ${nodeId}`);
   }
 
-  const variable = await figma.variables.getVariableByIdAsync(variableId);
+  const variable = await resolveVariable(variableId);
   if (!variable) {
-    throw new Error(`Variable not found with ID: ${variableId}`);
+    throw new Error(`Variable not found with ID or key: ${variableId}`);
   }
 
   // Apply the variable binding
@@ -6065,9 +6089,9 @@ async function deleteVariable(params) {
     throw new Error("Missing variableId parameter");
   }
 
-  const variable = await figma.variables.getVariableByIdAsync(variableId);
+  const variable = await resolveVariable(variableId);
   if (!variable) {
-    throw new Error(`Variable not found with ID: ${variableId}`);
+    throw new Error(`Variable not found with ID or key: ${variableId}`);
   }
 
   const name = variable.name;
@@ -7099,8 +7123,8 @@ async function bulkApplyVariables(params) {
       }
       const node = await getNodeByIdSafe(nodeId);
       if (!node) throw new Error(`Node not found: ${nodeId}`);
-      const variable = await figma.variables.getVariableByIdAsync(variableId);
-      if (!variable) throw new Error(`Variable not found: ${variableId}`);
+      const variable = await resolveVariable(variableId);
+      if (!variable) throw new Error(`Variable not found with ID or key: ${variableId}`);
       if (!("setBoundVariable" in node)) throw new Error(`Node ${node.type} does not support variable bindings`);
 
       const paintMatch = field.match(/^(fills|strokes)\/(\d+)\/color$/);
