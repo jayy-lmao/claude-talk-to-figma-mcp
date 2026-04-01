@@ -199,6 +199,8 @@ async function handleCommand(command, params) {
       return await loadFontAsyncWrapper(params);
     case "get_remote_components":
       return await getRemoteComponents(params);
+    case "get_available_libraries":
+      return await getAvailableLibraries();
     case "set_effects":
       return await setEffects(params);
     case "set_effect_style_id":
@@ -3033,12 +3035,10 @@ async function loadFontAsyncWrapper(params) {
   }
 }
 
-async function getRemoteComponents() {
+async function getRemoteComponents(params) {
   try {
-    // Figma removed getAvailableComponentsAsync from the Plugin API.
-    // Instead, we scan the document for component instances that come from
-    // external libraries (remote components already in use).
-    console.log("Scanning document for remote component instances...");
+    const { allPages = false } = params || {};
+    console.log(`Scanning ${allPages ? "all pages" : "current page"} for remote component instances...`);
 
     const remoteComponents = new Map();
     const instances = [];
@@ -3055,7 +3055,13 @@ async function getRemoteComponents() {
       }
     }
 
-    collectInstances(figma.currentPage);
+    if (allPages) {
+      for (const page of figma.root.children) {
+        collectInstances(page);
+      }
+    } else {
+      collectInstances(figma.currentPage);
+    }
 
     // Second pass: resolve main components asynchronously
     for (const instance of instances) {
@@ -3100,6 +3106,46 @@ async function getRemoteComponents() {
   } catch (error) {
     console.error(`Error scanning for remote components: ${error.message || "Unknown error"}`);
     throw new Error(`Error retrieving remote components: ${error.message}`);
+  }
+}
+
+async function getAvailableLibraries() {
+  try {
+    const libraries = [];
+
+    // Get available variable collections (gives us library names)
+    if (figma.teamLibrary) {
+      try {
+        const varCollections = await figma.teamLibrary.getAvailableLibraryVariableCollectionsAsync();
+        const libraryMap = new Map();
+        for (const collection of varCollections) {
+          if (!libraryMap.has(collection.libraryName)) {
+            libraryMap.set(collection.libraryName, {
+              name: collection.libraryName,
+              variableCollections: [],
+            });
+          }
+          libraryMap.get(collection.libraryName).variableCollections.push({
+            name: collection.name,
+            key: collection.key,
+          });
+        }
+        for (const lib of libraryMap.values()) {
+          libraries.push(lib);
+        }
+      } catch (e) {
+        console.warn(`Could not fetch library variable collections: ${e.message}`);
+      }
+    }
+
+    return {
+      success: true,
+      count: libraries.length,
+      libraries: libraries,
+      note: "Lists team libraries with their variable collections. Use get_remote_components with allPages=true to discover all remote component instances across the document.",
+    };
+  } catch (error) {
+    throw new Error(`Error retrieving available libraries: ${error.message}`);
   }
 }
 

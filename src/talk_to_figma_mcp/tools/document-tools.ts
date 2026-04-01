@@ -207,15 +207,16 @@ export function registerDocumentTools(server: McpServer): void {
   // Get Remote Components Tool
   server.tool(
     "get_remote_components",
-    "Get remote library components currently used in the Figma document. Optionally filter by libraryName (exact match) or nameFilter (case-insensitive substring match on component name).",
+    "Get remote library components currently used in the Figma document. Optionally filter by libraryName (exact match) or nameFilter (case-insensitive substring match on component name). Set allPages=true to scan all pages instead of just the current page.",
     {
       libraryName: z.string().optional().describe("Return only components from this library (exact name match)"),
       nameFilter: z.string().optional().describe("Case-insensitive substring to filter component names (e.g. 'Button' returns all button variants)"),
+      allPages: z.boolean().optional().default(false).describe("When true, scan all pages in the document instead of just the current page"),
       channel: z.string().optional().describe("Target channel to send the command to (uses active channel if omitted)"),
     },
-    async ({ libraryName, nameFilter, channel }) => {
+    async ({ libraryName, nameFilter, allPages, channel }) => {
       try {
-        const result = await sendCommandToFigma("get_remote_components", { libraryName, nameFilter }, { channel });
+        const result = await sendCommandToFigma("get_remote_components", { libraryName, nameFilter, allPages }, { channel });
         return {
           content: [
             {
@@ -230,6 +231,37 @@ export function registerDocumentTools(server: McpServer): void {
             {
               type: "text",
               text: `Error getting remote components: ${error instanceof Error ? error.message : String(error)}`
+            }
+          ]
+        };
+      }
+    }
+  );
+
+  // Get Available Libraries Tool
+  server.tool(
+    "get_available_libraries",
+    "Get team libraries available in the Figma document, including their variable collections.",
+    {
+      channel: z.string().optional().describe("Target channel to send the command to (uses active channel if omitted)"),
+    },
+    async ({ channel }) => {
+      try {
+        const result = await sendCommandToFigma("get_available_libraries", {}, { channel });
+        return {
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify(result, null, 2)
+            }
+          ]
+        };
+      } catch (error) {
+        return {
+          content: [
+            {
+              type: "text",
+              text: `Error getting available libraries: ${error instanceof Error ? error.message : String(error)}`
             }
           ]
         };

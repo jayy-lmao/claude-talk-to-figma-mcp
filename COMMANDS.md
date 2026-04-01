@@ -25,7 +25,8 @@ Complete reference of the tools available to interact with Figma.
 | `scan_text_nodes` | Find all text nodes | Text audit and update |
 | `get_styles` | Document styles | Color and text style audit |
 | `get_local_components` | Project components | Design system audit |
-| `get_remote_components` | Team libraries | Access shared components (supports filtering by library and name) |
+| `get_remote_components` | Team libraries | Access shared components (supports filtering by library and name, allPages=true to scan entire document) |
+| `get_available_libraries` | Available libraries | List team libraries and their variable collections |
 | `export_node_as_image` | Export assets | Generate design assets (PNG, JPG, SVG, PDF) |
 | `get_pages` | List pages | View all document pages |
 | `create_page` | Create page | Add a new page to the document |

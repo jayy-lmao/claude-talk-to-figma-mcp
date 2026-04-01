@@ -160,7 +160,8 @@ Modify text content and typography.
 
 ### Components
 Work with reusable design components.
-- get_local_components / get_remote_components — List available components (remote supports libraryName and nameFilter)
+- get_local_components / get_remote_components — List available components (remote supports libraryName, nameFilter, allPages)
+- get_available_libraries — List team libraries and their variable collections
 - get_all_components — Combined local + remote catalog with filtering (compound tool)
 - create_component_from_node / create_component_set — Create components/variants
 - create_component_instance — Instantiate by component key (supports parentId)
@@ -529,6 +530,9 @@ get_local_components — Get all local components. No parameters.
 get_remote_components — Get remote library components in use.
   libraryName (string, optional) — Filter by exact library name
   nameFilter (string, optional) — Case-insensitive substring filter on component name
+  allPages (boolean, optional) — Scan all pages instead of just the current page
+
+get_available_libraries — List team libraries and their variable collections. No parameters.
 
 get_pages — List all pages. No parameters.
 
