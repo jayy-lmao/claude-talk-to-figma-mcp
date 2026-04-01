@@ -44,6 +44,47 @@ export async function buildNodeTree(
 }
 
 /**
+ * Summarize raw Figma variables into a compact text format.
+ * Converts RGBA floats to hex, rounds numbers, and outputs one line per variable.
+ */
+function summarizeVariables(rawVars: any): string {
+  const collections = rawVars?.collections ?? (Array.isArray(rawVars) ? rawVars : [rawVars]);
+  const lines: string[] = [];
+
+  for (const collection of collections) {
+    if (!collection || typeof collection !== "object") continue;
+    const name = collection.name ?? "Unknown Collection";
+    const modes = collection.modes?.map((m: any) => m.name).join(", ") ?? "";
+    lines.push(`### ${name}${modes ? ` (modes: ${modes})` : ""}`);
+
+    const vars = collection.variables ?? [];
+    for (const v of vars) {
+      const type = v.resolvedType ?? "UNKNOWN";
+      const modeValues = v.valuesByMode ?? {};
+      const firstModeKey = Object.keys(modeValues)[0];
+      const val = firstModeKey ? modeValues[firstModeKey] : v.value;
+
+      let displayVal: string;
+      if (type === "COLOR" && val && typeof val === "object" && "r" in val) {
+        const r = Math.round(val.r * 255);
+        const g = Math.round(val.g * 255);
+        const b = Math.round(val.b * 255);
+        const a = val.a !== undefined ? Math.round(val.a * 255) : 255;
+        displayVal = `#${r.toString(16).padStart(2, "0")}${g.toString(16).padStart(2, "0")}${b.toString(16).padStart(2, "0")}${a === 255 ? "" : a.toString(16).padStart(2, "0")}`;
+      } else if (typeof val === "number") {
+        displayVal = String(Math.round(val * 100) / 100);
+      } else {
+        displayVal = JSON.stringify(val);
+      }
+
+      lines.push(`${v.name} | ${type} | ${displayVal}`);
+    }
+    lines.push("");
+  }
+  return lines.join("\n");
+}
+
+/**
  * Register compound tools to the MCP server.
  * Compound tools combine multiple logical steps into a single operation to
  * reduce round-trips and speed up iteration cycles.
@@ -1632,7 +1673,7 @@ export function registerCompoundTools(server: McpServer): void {
                 return {
                   role,
                   channel,
-                  content: `## Design Tokens (${channel})\n\n\`\`\`json\n${JSON.stringify(vars, null, 2)}\n\`\`\``,
+                  content: `## Design Tokens (${channel})\n\n${summarizeVariables(vars)}`,
                 };
               }
 

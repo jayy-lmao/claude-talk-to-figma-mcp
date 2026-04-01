@@ -157,8 +157,15 @@ export function filterFigmaNodeSummary(node: any) {
   // Text content
   if (node.characters) filtered.characters = node.characters;
 
-  // Component/instance info
-  if (node.componentProperties) filtered.componentProperties = node.componentProperties;
+  // Component/instance info (strip preferredValues — swap candidate lists bloat responses)
+  if (node.componentProperties) {
+    const cleaned: any = {};
+    for (const [key, prop] of Object.entries(node.componentProperties as Record<string, any>)) {
+      const { preferredValues, ...rest } = prop;
+      cleaned[key] = rest;
+    }
+    filtered.componentProperties = cleaned;
+  }
   if (node.variantProperties) filtered.variantProperties = node.variantProperties;
   if (node.componentKey) filtered.componentKey = node.componentKey;
   if (node.mainComponent) {
