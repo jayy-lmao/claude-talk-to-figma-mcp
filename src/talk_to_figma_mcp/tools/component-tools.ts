@@ -49,37 +49,6 @@ export function registerComponentTools(server: McpServer): void {
     }
   );
 
-  // Get Available Libraries Tool
-  server.tool(
-    "get_available_libraries",
-    "List all available remote libraries in the Figma team (component and variable libraries).",
-    {
-      channel: z.string().optional().describe("Target channel to send the command to (uses active channel if omitted)"),
-    },
-    async ({ channel }) => {
-      try {
-        const result = await sendCommandToFigma("get_available_libraries", {}, { channel });
-        return {
-          content: [
-            {
-              type: "text",
-              text: JSON.stringify(result, null, 2),
-            }
-          ]
-        }
-      } catch (error) {
-        return {
-          content: [
-            {
-              type: "text",
-              text: `Error getting available libraries: ${error instanceof Error ? error.message : String(error)}`,
-            },
-          ],
-        };
-      }
-    }
-  );
-
   // Create Component from Node Tool
   server.tool(
     "create_component_from_node",

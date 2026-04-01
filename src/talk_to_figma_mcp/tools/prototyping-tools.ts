@@ -260,8 +260,10 @@ export function registerPrototypingTools(server: McpServer): void {
   server.tool(
     "get_flow_starting_points",
     "Get all prototype flow starting points on the current page",
-    {},
-    async () => {
+    {
+      channel: z.string().optional().describe("Target channel to send the command to (uses active channel if omitted)"),
+    },
+    async ({ channel }) => {
       try {
         const result = await sendCommandToFigma("get_flow_starting_points", {}, { channel });
         return {
