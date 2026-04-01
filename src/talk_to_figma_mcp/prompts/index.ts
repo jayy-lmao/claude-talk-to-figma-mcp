@@ -115,7 +115,8 @@ Discover, connect, and manage communication channels.
 Read document structure, manage pages, inspect nodes.
 - get_document_info — Document metadata overview
 - get_selection — Current user selection
-- get_node_info / get_nodes_info — Inspect specific nodes (batch with get_nodes_info for efficiency)
+- get_node_info / get_nodes_info — Inspect specific nodes (batch with get_nodes_info for efficiency). Use mode='summary' for compact structural data.
+- get_node_tree — Compact hierarchical tree of a subtree (structure, dimensions, layout, text, components — no styling). **Prefer this over get_node_info for understanding design structure.**
 - scan_text_nodes — Find all text in a subtree
 - get_pages / set_current_page / create_page / create_slide / delete_page / rename_page / duplicate_page
 - export_node_as_image — Visual export (PNG/JPG/SVG/PDF)
@@ -219,10 +220,12 @@ Combine multiple operations to reduce round-trips.
 - set_node_appearance — Set fill, stroke, corner radius, opacity at once
 - bulk_create_nodes — Create multiple rectangles/frames/text/ellipses in one call
 - bulk_update_text — Update text on multiple nodes with per-node error reporting
-- get_all_components — Full local + remote component catalog with filtering
+- get_all_components — Full local + remote component catalog with filtering. Use summary=true for compact one-line-per-component output.
 - create_instance_with_properties — Place instance + set properties/variants in one step
 - swap_component_variant — Batch change variants on multiple instances
 - build_screen_from_template — Create artboard + populate with component instances
+- get_node_tree — Compact hierarchical tree view of a subtree (structure without styling)
+- generate_design_brief — Multi-channel condensed brief (reference structure + components + tokens + target context)
 
 ## Multi-Channel Support
 
@@ -233,8 +236,10 @@ All tools accept an optional \`channel\` parameter to target a specific joined c
 ### Reading a Design
 1. Call get_selection to see what the user has selected
 2. If no selection, ask the user to select nodes in Figma
-3. Call get_nodes_info with the selected node IDs for batch inspection
-4. Use export_node_as_image to get a visual snapshot when needed
+3. Use export_node_as_image to get a visual snapshot for context (most token-efficient)
+4. Use get_node_tree to understand layout structure (compact hierarchy without styling)
+5. Use get_node_info with mode='summary' for specific nodes needing more detail
+6. Only use get_node_info with mode='full' when you need fills, strokes, or style information
 
 ### Creating a Design
 1. Start with get_document_info to understand the document
@@ -266,12 +271,20 @@ For complex text replacement across designs, use the text_replacement_strategy p
 5. Replace manual elements with replace_node_with_instance to swap frames for library component instances
 6. Scan for annotations with find_nodes (hasAnnotations: true) to discover designer notes
 
+### Multi-File Design Workflow
+When working across multiple Figma files (e.g., a reference design, component library, design tokens, and target file):
+1. Join all necessary channels with join_channel
+2. Use generate_design_brief with sources for each file and their roles (reference, library, tokens, target)
+3. The brief provides compact, labeled sections — reference structure, component catalog, design tokens, and target context
+4. Use specific tools on individual channels for detailed follow-up as needed
+
 ## Key Conventions
 
 - Colors: Always RGBA with values 0-1 (not 0-255). Example: {r: 0.2, g: 0.4, b: 1.0, a: 1.0}
 - Coordinates: Local to parent (not absolute canvas). Use get_node_info to see both localPosition and absoluteBoundingBox
 - Node IDs: Returned by creation tools. Store and reuse them for subsequent operations
 - Batch operations: Prefer get_nodes_info over multiple get_node_info calls. Prefer set_multiple_text_contents over multiple set_text_content calls
+- Context efficiency: Prefer get_node_tree over get_node_info for understanding structure. Use mode='summary' on get_node_info for focused inspection. Use get_all_components with summary=true for component discovery. Use generate_design_brief for multi-file workflows.
 - Font loading: Call load_font_async before changing font properties if needed
 
 ## Additional Prompts
@@ -386,12 +399,22 @@ Login Screen (main frame)
 
 ## Reading Design Strategy
 
-When reading Figma designs:
+When reading Figma designs, use the most context-efficient approach:
 
 1. Start with get_selection() to understand the current selection
 2. If no selection, ask the user to select nodes
-3. Use get_nodes_info() for batch inspection of selected nodes
-4. Use export_node_as_image() for visual verification`;
+3. Use export_node_as_image() for visual understanding (most compact)
+4. Use get_node_tree() for hierarchical structure (dimensions, layout, text, components — no styling)
+5. Use get_node_info(mode='summary') for specific nodes needing more detail
+6. Only use get_node_info(mode='full') when you need fills, strokes, or style specifics
+7. Use get_all_components(summary=true) for component discovery in large files
+
+### Multi-File Workflows
+
+When working across multiple Figma files (reference designs, component libraries, design tokens):
+1. Join all channels with join_channel
+2. Use generate_design_brief to get a condensed overview from all sources
+3. Follow up with specific tools on individual channels as needed`;
 
 
 const TEXT_REPLACEMENT_STRATEGY_CONTENT = `# Intelligent Text Replacement Strategy
@@ -543,8 +566,9 @@ get_document_info — Get document metadata. No parameters.
 
 get_selection — Get current selection in Figma. No parameters.
 
-get_node_info — Get detailed info about a specific node.
+get_node_info — Get info about a specific node. Use mode='summary' for compact structural data, mode='full' for complete details.
   nodeId (string, required) — Node ID
+  mode (enum: full/summary, optional, default: full) — 'summary' returns only structural properties (id, name, type, dimensions, layout, text, component info). 'full' returns complete details including fills, strokes, and styles.
   Returns: Node properties, absoluteBoundingBox (global coords), localPosition (parent-relative, use for move_node)
 
 get_nodes_info — Batch fetch node details.
@@ -1079,9 +1103,10 @@ bulk_update_text — Update text on multiple nodes.
   updates (array, min 1, required) — Each: {nodeId: string, text: string}
   Returns: Per-node success/failure without aborting
 
-get_all_components — List all local + remote components.
+get_all_components — List all local + remote components. Use summary=true for compact catalog.
   filter (string, optional) — Case-insensitive name filter
   includeRemote (boolean, optional, default: true)
+  summary (boolean, optional, default: false) — When true, return compact one-line-per-component format (name, key, source, library)
 
 create_instance_with_properties — Place instance + configure in one step.
   componentKey (string, required)
@@ -1108,6 +1133,18 @@ build_screen_from_template — Create artboard + populate with component instanc
     width (number, optional) — Resize instance width after placement
     height (number, optional) — Resize instance height after placement
     textOverrides (array, optional) — Each: {nodeName: string, text: string} — Set text on nested nodes by name
+
+get_node_tree — Get a compact hierarchical tree view of a subtree. Prefer this over get_node_info for understanding design structure.
+  nodeId (string, required) — Root node ID
+  maxDepth (number 1-10, optional, default: 3) — Maximum tree depth to traverse
+  Returns: Nested JSON tree with id, name, type, dimensions, layoutMode, characters, componentKey per node. No fills/strokes/styles.
+
+generate_design_brief — Generate a condensed multi-source design brief from multiple joined Figma channels.
+  sources (array, min 1, required) — Each:
+    channel (string, required) — Channel ID (must be joined)
+    role (enum: reference/library/tokens/target, required) — What to extract
+    nodeId (string, optional) — Root node (required for reference, optional for target)
+  Returns: Markdown-formatted brief with labeled sections for each source
 
 ## Search Tools
 

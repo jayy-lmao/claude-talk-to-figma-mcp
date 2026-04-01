@@ -20,7 +20,8 @@ Complete reference of the tools available to interact with Figma.
 |---------|---------|---------------|
 | `get_document_info` | Document analysis | Get project overview |
 | `get_selection` | Current selection | What is currently selected |
-| `get_node_info` | Element details | Inspect a specific component (includes parentId and parentName) |
+| `get_node_info` | Element details | Inspect a specific node. Use mode='summary' for compact structural data, mode='full' (default) for complete details |
+| `get_node_tree` | Compact tree view | Get hierarchical structure of a subtree without styling (dimensions, layout, text, components). Prefer over get_node_info for understanding design structure |
 | `get_nodes_info` | Multiple elements info | Batch inspection |
 | `scan_text_nodes` | Find all text nodes | Text audit and update |
 | `get_styles` | Document styles | Color and text style audit |
@@ -193,13 +194,15 @@ Compound tools combine multiple operations into a single call to reduce round-tr
 | `set_node_appearance` | Multi-property styling | Set fill, stroke, corner radius, and opacity at once |
 | `bulk_create_nodes` | Batch create | Create multiple rectangles, frames, text, and ellipses in one call |
 | `bulk_update_text` | Batch text update | Update text on multiple nodes with per-node error reporting |
-| `get_all_components` | Full component catalog | List all local and remote components (supports filtering) |
+| `get_all_components` | Full component catalog | List all local and remote components. Use summary=true for compact one-line-per-component output |
 | `create_instance_with_properties` | Place + configure | Create an instance and set properties/variants in one step. Accepts component set keys. Use get_component_set_info first to discover variant axes |
 | `get_component_set_info` | Variant discovery | Get variant axes, property definitions, and variant keys for a component set before instantiation |
 | `replace_node_with_instance` | Swap node for component | Replace a manual frame with a library component instance in one step (preserves position, size, parent, sibling order) |
 | `swap_component_variant` | Batch variant swap | Change variant properties on multiple instances at once |
 | `build_screen_from_template` | Build screen | Create an artboard and populate it with component instances |
 | `create_responsive_variants` | Responsive breakpoints | Clone a frame at multiple widths with proportional scaling of all children (e.g. Mobile 375, Tablet 768, Desktop 1440) |
+| `get_node_tree` | Compact tree view | Get hierarchical structure of a subtree (structure, dimensions, layout, text, components — no styling). Prefer over get_node_info for understanding design structure |
+| `generate_design_brief` | Multi-file brief | Read from multiple joined Figma files to generate a condensed design brief with reference, library, tokens, and target sections |
 
 ## Design System Token Workflow
 

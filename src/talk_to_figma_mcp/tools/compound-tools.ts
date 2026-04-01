@@ -1,7 +1,47 @@
 import { z } from "zod";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { sendCommandToFigma } from "../utils/websocket";
+import { sendCommandToFigma, getJoinedChannels } from "../utils/websocket";
 import { applyColorDefaults, applyDefault, FIGMA_DEFAULTS } from "../utils/defaults";
+import { filterFigmaNodeSummary } from "../utils/figma-helpers";
+
+/**
+ * Recursively build a compact hierarchical tree from a Figma node.
+ * Each level fetches node info and expands children up to maxDepth.
+ * Returns structural properties only (no fills, strokes, styles).
+ */
+export async function buildNodeTree(
+  nodeId: string,
+  maxDepth: number,
+  channel?: string,
+  currentDepth: number = 0
+): Promise<any> {
+  const result = await sendCommandToFigma("get_node_info", { nodeId }, { channel });
+  const node = filterFigmaNodeSummary(result);
+
+  if (!node) return null;
+
+  // If children exist and we haven't hit max depth, expand them
+  if (node.children && node.children.length > 0 && currentDepth < maxDepth) {
+    const expandedChildren: any[] = [];
+    for (const child of node.children) {
+      try {
+        const childTree = await buildNodeTree(child.id, maxDepth, channel, currentDepth + 1);
+        if (childTree) expandedChildren.push(childTree);
+      } catch (error) {
+        expandedChildren.push({
+          id: child.id,
+          name: child.name,
+          type: child.type,
+          _error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
+    node.children = expandedChildren;
+  }
+  // If at max depth but children exist, leave shallow refs as-is (signals more depth available)
+
+  return node;
+}
 
 /**
  * Register compound tools to the MCP server.
@@ -414,7 +454,7 @@ export function registerCompoundTools(server: McpServer): void {
   // so the LLM can discover the full component catalogue before placing instances.
   server.tool(
     "get_all_components",
-    "List all components available in the Figma document — both local components defined in this file and remote library components currently used. Returns name, key, and source for every component. Use the key with create_instance_with_properties to place instances.",
+    "List all components available in the Figma document — both local components defined in this file and remote library components currently used. Set summary=true for a compact one-line-per-component catalog (name, key, library only) ideal for component discovery in large files. Use the key with create_instance_with_properties to place instances.",
     {
       filter: z
         .string()
@@ -424,9 +464,13 @@ export function registerCompoundTools(server: McpServer): void {
         .boolean()
         .optional()
         .describe("Whether to include remote library components (default: true)"),
+      summary: z
+        .boolean()
+        .default(false)
+        .describe("When true, return a compact one-line-per-component catalog (name, key, source, library) without fonts or text slot details. Use for component discovery when you don't need detailed information."),
       channel: z.string().optional().describe("Target channel to send the command to (uses active channel if omitted)"),
     },
-    async ({ filter, includeRemote = true, channel }) => {
+    async ({ filter, includeRemote = true, summary, channel }) => {
       try {
         // Fetch local components
         const localResult = await sendCommandToFigma("get_local_components", {}, { channel });
@@ -492,15 +536,25 @@ export function registerCompoundTools(server: McpServer): void {
         }
 
         const lines: string[] = [`Found ${all.length} component(s)${filter ? ` matching "${filter}"` : ""}:\n`];
-        for (const c of all) {
-          const lib = c.libraryName ? ` [${c.libraryName}]` : "";
-          lines.push(`• ${c.name}${lib}`);
-          lines.push(`  key: ${c.key || "(no key)"}  source: ${c.source}`);
-          if ("fonts" in c && c.fonts && c.fonts.length > 0) {
-            lines.push(`  fonts: ${c.fonts.map((f: { family: string; style: string }) => `${f.family} ${f.style}`).join(", ")}`);
+
+        if (summary) {
+          // Compact one-line-per-component format
+          for (const c of all) {
+            const lib = c.libraryName ? ` [${c.libraryName}]` : "";
+            lines.push(`${c.name} | key: ${c.key || "(no key)"} | ${c.source}${lib}`);
           }
-          if ("editableTextNodes" in c && c.editableTextNodes && c.editableTextNodes.length > 0) {
-            lines.push(`  text slots: ${c.editableTextNodes.map((t: { name: string }) => t.name).join(", ")}`);
+        } else {
+          // Full multi-line format with fonts and text slots
+          for (const c of all) {
+            const lib = c.libraryName ? ` [${c.libraryName}]` : "";
+            lines.push(`• ${c.name}${lib}`);
+            lines.push(`  key: ${c.key || "(no key)"}  source: ${c.source}`);
+            if ("fonts" in c && c.fonts && c.fonts.length > 0) {
+              lines.push(`  fonts: ${c.fonts.map((f: { family: string; style: string }) => `${f.family} ${f.style}`).join(", ")}`);
+            }
+            if ("editableTextNodes" in c && c.editableTextNodes && c.editableTextNodes.length > 0) {
+              lines.push(`  text slots: ${c.editableTextNodes.map((t: { name: string }) => t.name).join(", ")}`);
+            }
           }
         }
 
@@ -1428,6 +1482,197 @@ export function registerCompoundTools(server: McpServer): void {
             {
               type: "text",
               text: `Error creating responsive variants: ${error instanceof Error ? error.message : String(error)}`,
+            },
+          ],
+        };
+      }
+    }
+  );
+
+  // ── Get Node Tree ───────────────────────────────────────────────────────────
+  // Returns a compact hierarchical tree of a Figma subtree.
+  server.tool(
+    "get_node_tree",
+    "Get a compact hierarchical tree view of a Figma subtree. Returns structure, dimensions, layout mode, component usage, and text content for each node — without styling details (no fills, strokes, effects). Use this instead of get_node_info when you need to understand the layout and structure of a design. For visual context, pair with export_node_as_image.",
+    {
+      nodeId: z.string().describe("The root node ID to start the tree from"),
+      maxDepth: z
+        .number()
+        .min(1)
+        .max(10)
+        .default(3)
+        .describe("Maximum depth of the tree to traverse (default: 3). Higher values give more detail but require more round trips to Figma."),
+      channel: z.string().optional().describe("Target channel to send the command to (uses active channel if omitted)"),
+    },
+    async ({ nodeId, maxDepth, channel }) => {
+      try {
+        const tree = await buildNodeTree(nodeId, maxDepth, channel);
+        if (!tree) {
+          return {
+            content: [{ type: "text", text: "Node not found or is a VECTOR type (skipped)." }],
+          };
+        }
+        return {
+          content: [{ type: "text", text: JSON.stringify(tree, null, 2) }],
+        };
+      } catch (error) {
+        return {
+          content: [
+            {
+              type: "text",
+              text: `Error building node tree: ${error instanceof Error ? error.message : String(error)}`,
+            },
+          ],
+        };
+      }
+    }
+  );
+
+  // ── Generate Design Brief ───────────────────────────────────────────────────
+  // Multi-channel orchestration tool that reads from multiple Figma files
+  // and returns a condensed design brief with role-based extraction.
+  server.tool(
+    "generate_design_brief",
+    "Generate a condensed multi-source design brief by reading from multiple joined Figma channels. Extracts compact structure from a reference design, component catalog from a library, design tokens from a foundations file, and document context from a target file. Each source requires a channel (from join_channel) and a role that determines what data is extracted. Use this for multi-file design workflows instead of manually reading each file.",
+    {
+      sources: z
+        .array(
+          z.object({
+            channel: z.string().describe("Channel ID of the Figma file (must be joined via join_channel)"),
+            role: z
+              .enum(["reference", "library", "tokens", "target"])
+              .describe("What to extract: 'reference' gets node tree structure, 'library' gets component catalog, 'tokens' gets design variables, 'target' gets document overview"),
+            nodeId: z
+              .string()
+              .optional()
+              .describe("Root node ID (required for 'reference' role, optional for 'target')"),
+          })
+        )
+        .min(1)
+        .describe("Array of sources to read from, each with a channel, role, and optional nodeId"),
+    },
+    async ({ sources }) => {
+      try {
+        // Validate all channels are joined
+        const joined = getJoinedChannels();
+        const unjoined = sources.filter((s) => !joined.has(s.channel));
+        if (unjoined.length > 0) {
+          return {
+            content: [
+              {
+                type: "text",
+                text: `Error: The following channels are not joined: ${unjoined.map((s) => s.channel).join(", ")}. Use join_channel first.`,
+              },
+            ],
+          };
+        }
+
+        // Validate reference sources have nodeId
+        const missingNodeId = sources.filter((s) => s.role === "reference" && !s.nodeId);
+        if (missingNodeId.length > 0) {
+          return {
+            content: [
+              {
+                type: "text",
+                text: `Error: 'reference' role requires a nodeId. Missing for channel(s): ${missingNodeId.map((s) => s.channel).join(", ")}`,
+              },
+            ],
+          };
+        }
+
+        // Process each source in parallel
+        const results = await Promise.allSettled(
+          sources.map(async (source) => {
+            const { channel, role, nodeId } = source;
+
+            switch (role) {
+              case "reference": {
+                const tree = await buildNodeTree(nodeId!, 4, channel);
+                return {
+                  role,
+                  channel,
+                  content: `## Reference Design (${channel})\n\n\`\`\`json\n${JSON.stringify(tree, null, 2)}\n\`\`\``,
+                };
+              }
+
+              case "library": {
+                const localResult = await sendCommandToFigma("get_local_components", {}, { channel });
+                const typedLocal = localResult as {
+                  count: number;
+                  components: Array<{ id: string; name: string; key: string | null }>;
+                };
+
+                let remoteComponents: Array<{ key: string; name: string; libraryName: string }> = [];
+                try {
+                  const remoteResult = await sendCommandToFigma("get_remote_components", {}, { channel });
+                  const typedRemote = remoteResult as { components: Array<{ key: string; name: string; libraryName: string }> };
+                  remoteComponents = typedRemote.components ?? [];
+                } catch {
+                  // Remote is best-effort
+                }
+
+                const lines: string[] = [];
+                for (const c of typedLocal.components) {
+                  lines.push(`${c.name} | key: ${c.key ?? "(no key)"} | local`);
+                }
+                for (const c of remoteComponents) {
+                  const lib = c.libraryName ? ` [${c.libraryName}]` : "";
+                  lines.push(`${c.name} | key: ${c.key} | remote${lib}`);
+                }
+
+                return {
+                  role,
+                  channel,
+                  content: `## Component Library (${channel})\n\n${lines.length} component(s):\n${lines.join("\n")}`,
+                };
+              }
+
+              case "tokens": {
+                const vars = await sendCommandToFigma("get_variables", {}, { channel });
+                return {
+                  role,
+                  channel,
+                  content: `## Design Tokens (${channel})\n\n\`\`\`json\n${JSON.stringify(vars, null, 2)}\n\`\`\``,
+                };
+              }
+
+              case "target": {
+                const docInfo = await sendCommandToFigma("get_document_info", {}, { channel });
+                let extra = "";
+                if (nodeId) {
+                  const tree = await buildNodeTree(nodeId, 2, channel);
+                  extra = `\n\nTarget node tree:\n\`\`\`json\n${JSON.stringify(tree, null, 2)}\n\`\`\``;
+                }
+                return {
+                  role,
+                  channel,
+                  content: `## Target Document (${channel})\n\n\`\`\`json\n${JSON.stringify(docInfo, null, 2)}\n\`\`\`${extra}`,
+                };
+              }
+            }
+          })
+        );
+
+        // Assemble the brief
+        const sections: string[] = [`# Design Brief\n\nSources: ${sources.map((s) => `${s.role}(${s.channel})`).join(", ")}\n`];
+
+        for (const result of results) {
+          if (result.status === "fulfilled") {
+            sections.push(result.value.content);
+          } else {
+            sections.push(`## Error\n\n${result.reason instanceof Error ? result.reason.message : String(result.reason)}`);
+          }
+        }
+
+        return {
+          content: [{ type: "text", text: sections.join("\n\n---\n\n") }],
+        };
+      } catch (error) {
+        return {
+          content: [
+            {
+              type: "text",
+              text: `Error generating design brief: ${error instanceof Error ? error.message : String(error)}`,
             },
           ],
         };

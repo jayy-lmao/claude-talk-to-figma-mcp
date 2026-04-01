@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { sendCommandToFigma, joinChannel, getCurrentChannel, getJoinedChannels, setActiveChannel, leaveChannel } from "../utils/websocket.js";
-import { filterFigmaNode } from "../utils/figma-helpers.js";
+import { filterFigmaNode, filterFigmaNodeSummary } from "../utils/figma-helpers.js";
 import { defaultPort } from "../config/config.js";
 
 /**
@@ -74,14 +74,28 @@ export function registerDocumentTools(server: McpServer): void {
   // Node Info Tool
   server.tool(
     "get_node_info",
-    "Get detailed information about a specific node in Figma. Response includes parentId and parentName for traversing the node hierarchy.",
+    "Get information about a specific node in Figma. Use mode='summary' for a compact view with only structural properties (dimensions, layout, text, component info) — ideal for understanding design structure. Use mode='full' (default) for complete details including fills, strokes, and styles. Response includes parentId and parentName for traversing the node hierarchy.",
     {
       nodeId: z.string().describe("The ID of the node to get information about"),
+      mode: z.enum(["full", "summary"]).default("full").describe("Response detail level. 'summary' returns only structural properties (id, name, type, dimensions, layout, text content, component info). 'full' (default) returns complete node details including fills, strokes, and styles."),
       channel: z.string().optional().describe("Target channel to send the command to (uses active channel if omitted)"),
     },
-    async ({ nodeId, channel }) => {
+    async ({ nodeId, mode, channel }) => {
       try {
         const result = await sendCommandToFigma("get_node_info", { nodeId }, { channel });
+
+        if (mode === "summary") {
+          const filtered = filterFigmaNodeSummary(result);
+          return {
+            content: [
+              {
+                type: "text",
+                text: JSON.stringify(filtered)
+              }
+            ]
+          };
+        }
+
         const filtered = filterFigmaNode(result);
         const coordinateNote = filtered.absoluteBoundingBox && filtered.localPosition
           ? "absoluteBoundingBox contains global coordinates (relative to canvas). localPosition contains local coordinates (relative to parent, use these for move_node)."

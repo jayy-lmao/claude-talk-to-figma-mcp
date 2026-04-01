@@ -116,6 +116,72 @@ export function filterFigmaNode(node: any) {
 }
 
 /**
+ * Filters a Figma node to return only structural properties.
+ * Returns a compact representation with layout, dimensions, text content,
+ * and component info — no fills, strokes, styles, or colors.
+ * Use this for understanding design structure without visual details.
+ * @param node - The Figma node to filter
+ * @returns The compact node or null if it should be ignored
+ */
+export function filterFigmaNodeSummary(node: any) {
+  if (node.type === "VECTOR") {
+    return null;
+  }
+
+  const filtered: any = {
+    id: node.id,
+    name: node.name,
+    type: node.type,
+  };
+
+  // Dimensions from bounding box
+  if (node.absoluteBoundingBox) {
+    filtered.width = node.absoluteBoundingBox.width;
+    filtered.height = node.absoluteBoundingBox.height;
+  }
+
+  if (node.localPosition) {
+    filtered.localPosition = node.localPosition;
+  }
+
+  // Layout properties (auto-layout frames)
+  if (node.layoutMode) filtered.layoutMode = node.layoutMode;
+  if (node.itemSpacing !== undefined) filtered.itemSpacing = node.itemSpacing;
+  if (node.primaryAxisAlignItems) filtered.primaryAxisAlignItems = node.primaryAxisAlignItems;
+  if (node.counterAxisAlignItems) filtered.counterAxisAlignItems = node.counterAxisAlignItems;
+  if (node.paddingTop) filtered.paddingTop = node.paddingTop;
+  if (node.paddingBottom) filtered.paddingBottom = node.paddingBottom;
+  if (node.paddingLeft) filtered.paddingLeft = node.paddingLeft;
+  if (node.paddingRight) filtered.paddingRight = node.paddingRight;
+
+  // Text content
+  if (node.characters) filtered.characters = node.characters;
+
+  // Component/instance info
+  if (node.componentProperties) filtered.componentProperties = node.componentProperties;
+  if (node.variantProperties) filtered.variantProperties = node.variantProperties;
+  if (node.componentKey) filtered.componentKey = node.componentKey;
+  if (node.mainComponent) {
+    filtered.mainComponent = {
+      key: node.mainComponent.key,
+      name: node.mainComponent.name,
+    };
+  }
+
+  // Children as shallow refs (don't recurse — caller handles depth)
+  if (node.children) {
+    filtered.children = node.children
+      .map((child: any) => {
+        if (child.type === "VECTOR") return null;
+        return { id: child.id, name: child.name, type: child.type };
+      })
+      .filter((child: any) => child !== null);
+  }
+
+  return filtered;
+}
+
+/**
  * Convert global coordinates to local coordinates relative to a parent
  */
 export function globalToLocal(
