@@ -911,4 +911,126 @@ export function registerCompoundTools(server: McpServer): void {
       }
     }
   );
+
+  // ── Bulk Load Fonts ─────────────────────────────────────────────────
+  server.tool(
+    "bulk_load_fonts",
+    "Load multiple font family+style combinations in a single operation. Call this once at session start to pre-load all needed fonts.",
+    {
+      fonts: z.array(z.object({
+        family: z.string().describe("Font family name (e.g. 'Rund Text', 'Inter')"),
+        style: z.string().optional().describe("Font style (default: 'Regular'). E.g. 'Bold', 'Medium', 'SemiBold'"),
+      })).min(1).describe("Array of font family+style pairs to load"),
+      channel: z.string().optional().describe("Target channel to send the command to (uses active channel if omitted)"),
+    },
+    async ({ fonts, channel }) => {
+      try {
+        const result = await sendCommandToFigma("bulk_load_fonts", { fonts }, { channel });
+        const typedResult = result as { total: number; succeeded: number; failed: number; results: any[] };
+        const summary = typedResult.results
+          .map((r: any, i: number) => `  [${i}] ${r.family} ${r.style || "Regular"} — ${r.success ? "OK" : `FAILED: ${r.error}`}`)
+          .join("\n");
+        return {
+          content: [
+            {
+              type: "text",
+              text: `Loaded ${typedResult.succeeded}/${typedResult.total} font(s):\n${summary}`,
+            },
+          ],
+        };
+      } catch (error) {
+        return {
+          content: [
+            {
+              type: "text",
+              text: `Error bulk loading fonts: ${error instanceof Error ? error.message : String(error)}`,
+            },
+          ],
+        };
+      }
+    }
+  );
+
+  // ── Bulk Apply Variables ────────────────────────────────────────────
+  server.tool(
+    "bulk_apply_variables",
+    "Bind Figma variables to multiple nodes in a single operation. Each binding specifies a node, variable, and field (e.g. 'fills/0/color'). Ideal for applying design tokens across a frame.",
+    {
+      bindings: z.array(z.object({
+        nodeId: z.string().describe("ID of the node to bind the variable to"),
+        variableId: z.string().describe("ID of the variable to bind"),
+        field: z.string().describe("Property field path (e.g. 'fills/0/color', 'strokes/0/color', 'itemSpacing', 'paddingTop')"),
+      })).min(1).describe("Array of variable bindings to apply"),
+      channel: z.string().optional().describe("Target channel to send the command to (uses active channel if omitted)"),
+    },
+    async ({ bindings, channel }) => {
+      try {
+        const result = await sendCommandToFigma("bulk_apply_variables", { bindings }, { channel });
+        const typedResult = result as { total: number; succeeded: number; failed: number; results: any[] };
+        const failures = typedResult.results.filter((r: any) => !r.success);
+        let text = `Applied ${typedResult.succeeded}/${typedResult.total} variable binding(s).`;
+        if (failures.length > 0) {
+          text += `\nFailures:\n` + failures.map((r: any) => `  ${r.nodeId} — ${r.error}`).join("\n");
+        }
+        return { content: [{ type: "text", text }] };
+      } catch (error) {
+        return {
+          content: [
+            {
+              type: "text",
+              text: `Error bulk applying variables: ${error instanceof Error ? error.message : String(error)}`,
+            },
+          ],
+        };
+      }
+    }
+  );
+
+  // ── Bulk Add Reactions ──────────────────────────────────────────────
+  server.tool(
+    "bulk_add_reactions",
+    "Add prototyping reactions to multiple nodes in a single operation. Supports NAVIGATE, BACK, CLOSE, and URL reactions. Ideal for wiring up an entire prototype flow at once.",
+    {
+      reactions: z.array(z.object({
+        nodeId: z.string().describe("ID of the trigger node"),
+        trigger: z.enum([
+          "ON_CLICK", "ON_DRAG", "ON_HOVER", "ON_PRESS",
+          "MOUSE_ENTER", "MOUSE_LEAVE", "MOUSE_UP", "MOUSE_DOWN", "AFTER_TIMEOUT",
+        ]).describe("Trigger type"),
+        triggerTimeout: z.number().min(0).optional().describe("Timeout in ms (only for AFTER_TIMEOUT)"),
+        navigationType: z.enum(["NAVIGATE", "OVERLAY", "SWAP", "SCROLL_TO", "CHANGE_TO"]).optional()
+          .describe("Navigation type (for NODE actions)"),
+        destinationId: z.string().optional().describe("Destination node ID (for NODE actions)"),
+        transition: z.object({
+          type: z.enum(["DISSOLVE", "SMART_ANIMATE", "MOVE_IN", "MOVE_OUT", "PUSH", "SLIDE_IN", "SLIDE_OUT"]),
+          duration: z.number().min(0).optional(),
+          easing: z.enum(["LINEAR", "EASE_IN", "EASE_OUT", "EASE_IN_AND_OUT"]).optional(),
+        }).optional().describe("Transition animation"),
+        actionType: z.enum(["BACK", "CLOSE"]).optional().describe("For back/close reactions"),
+        url: z.string().optional().describe("URL to open (for URL reactions)"),
+      })).min(1).describe("Array of reactions to add"),
+      channel: z.string().optional().describe("Target channel to send the command to (uses active channel if omitted)"),
+    },
+    async ({ reactions, channel }) => {
+      try {
+        const result = await sendCommandToFigma("bulk_add_reactions", { reactions }, { channel });
+        const typedResult = result as { total: number; succeeded: number; failed: number; results: any[] };
+        const failures = typedResult.results.filter((r: any) => !r.success);
+        let text = `Added ${typedResult.succeeded}/${typedResult.total} reaction(s).`;
+        if (failures.length > 0) {
+          text += `\nFailures:\n` + failures.map((r: any) => `  ${r.nodeId} — ${r.error}`).join("\n");
+        }
+        return { content: [{ type: "text", text }] };
+      } catch (error) {
+        return {
+          content: [
+            {
+              type: "text",
+              text: `Error bulk adding reactions: ${error instanceof Error ? error.message : String(error)}`,
+            },
+          ],
+        };
+      }
+    }
+  );
 }

@@ -342,6 +342,16 @@ async function handleCommand(command, params) {
       return await setPrototypeStartNode(params);
     case "fix_fonts":
       return await fixFonts(params);
+    // ── Bulk commands ───────────────────────────────────────────────────
+    case "bulk_load_fonts":
+      return await bulkLoadFonts(params);
+    case "bulk_apply_variables":
+      return await bulkApplyVariables(params);
+    case "bulk_add_reactions":
+      return await bulkAddReactions(params);
+    // ── Search commands ──────────────────────────────────────────────────
+    case "find_nodes":
+      return await findNodes(params);
     default:
       throw new Error(`Unknown command: ${command}`);
   }
@@ -5598,6 +5608,137 @@ async function getAnnotation(params) {
   };
 }
 
+// Search for nodes matching filter criteria across pages
+async function findNodes(params) {
+  const {
+    scope = "currentPage",
+    filters = {},
+    limit = 100,
+    offset = 0,
+  } = params || {};
+
+  const {
+    nodeTypes,
+    name,
+    nameRegex,
+    textContent,
+    componentName,
+    hasAnnotations,
+    annotationLabel,
+  } = filters;
+
+  // Compile regex patterns once
+  const nameRe = nameRegex ? new RegExp(nameRegex, "i") : null;
+
+  // Determine pages to search
+  let pages;
+  if (scope === "allPages") {
+    await figma.loadAllPagesAsync();
+    pages = figma.root.children;
+  } else {
+    pages = [figma.currentPage];
+  }
+
+  const matches = [];
+  let totalFound = 0;
+
+  for (const page of pages) {
+    // Get candidate nodes
+    let candidates;
+    if (nodeTypes && nodeTypes.length > 0) {
+      candidates = page.findAllWithCriteria({ types: nodeTypes });
+    } else {
+      candidates = page.findAll(() => true);
+    }
+
+    for (const node of candidates) {
+      // Name substring filter
+      if (name && !node.name.toLowerCase().includes(name.toLowerCase())) {
+        continue;
+      }
+
+      // Name regex filter
+      if (nameRe && !nameRe.test(node.name)) {
+        continue;
+      }
+
+      // Text content filter (TEXT nodes only)
+      if (textContent) {
+        if (node.type !== "TEXT") continue;
+        if (!node.characters.toLowerCase().includes(textContent.toLowerCase())) {
+          continue;
+        }
+      }
+
+      // Component name filter (INSTANCE nodes)
+      if (componentName) {
+        if (node.type !== "INSTANCE") continue;
+        const mainName = node.mainComponent ? node.mainComponent.name : "";
+        if (!mainName.toLowerCase().includes(componentName.toLowerCase())) {
+          continue;
+        }
+      }
+
+      // Annotations filter
+      if (hasAnnotations) {
+        if (!("annotations" in node) || !node.annotations || node.annotations.length === 0) {
+          continue;
+        }
+      }
+
+      // Annotation label filter
+      if (annotationLabel) {
+        if (!("annotations" in node) || !node.annotations) continue;
+        const hasMatch = node.annotations.some(
+          (a) => a.label && a.label.toLowerCase().includes(annotationLabel.toLowerCase())
+        );
+        if (!hasMatch) continue;
+      }
+
+      totalFound++;
+
+      // Apply offset/limit
+      if (totalFound <= offset) continue;
+      if (matches.length >= limit) continue;
+
+      const entry = {
+        id: node.id,
+        name: node.name,
+        type: node.type,
+        pageName: page.name,
+        pageId: page.id,
+      };
+
+      // Include annotations summary if present
+      if ("annotations" in node && node.annotations && node.annotations.length > 0) {
+        entry.annotations = node.annotations.map((a) => ({
+          label: a.label,
+        }));
+      }
+
+      // Include text content for TEXT nodes
+      if (node.type === "TEXT") {
+        entry.characters = node.characters;
+      }
+
+      // Include component info for INSTANCE nodes
+      if (node.type === "INSTANCE" && node.mainComponent) {
+        entry.componentName = node.mainComponent.name;
+      }
+
+      matches.push(entry);
+    }
+  }
+
+  return {
+    totalFound,
+    returned: matches.length,
+    offset,
+    limit,
+    nodes: matches,
+  };
+}
+
 // Get all variable collections and their variables
 async function getVariables() {
   // Check if Variables API is available
@@ -6871,4 +7012,116 @@ async function setPrototypeStartNode(params) {
     pageName: page.name,
     prototypeStartNodeId: page.prototypeStartNode ? page.prototypeStartNode.id : null,
   };
+}
+
+// ── Bulk operations ───────────────────────────────────────────────────
+
+async function bulkLoadFonts(params) {
+  const { fonts } = params || {};
+  if (!fonts || !Array.isArray(fonts) || fonts.length === 0) {
+    throw new Error("Missing or empty fonts array");
+  }
+  const results = [];
+  for (const font of fonts) {
+    const family = font.family;
+    const style = font.style || "Regular";
+    try {
+      await figma.loadFontAsync({ family, style });
+      results.push({ family, style, success: true });
+    } catch (error) {
+      results.push({ family, style, success: false, error: error.message });
+    }
+  }
+  const succeeded = results.filter(r => r.success).length;
+  return { total: fonts.length, succeeded, failed: fonts.length - succeeded, results };
+}
+
+async function bulkApplyVariables(params) {
+  const { bindings } = params || {};
+  if (!bindings || !Array.isArray(bindings) || bindings.length === 0) {
+    throw new Error("Missing or empty bindings array");
+  }
+  if (!figma.variables) {
+    throw new Error("Variables API is not available");
+  }
+  const results = [];
+  for (const binding of bindings) {
+    const { nodeId, variableId, field } = binding;
+    try {
+      if (!nodeId || !variableId || !field) {
+        throw new Error("Each binding requires nodeId, variableId, and field");
+      }
+      const node = await getNodeByIdSafe(nodeId);
+      if (!node) throw new Error(`Node not found: ${nodeId}`);
+      const variable = await figma.variables.getVariableByIdAsync(variableId);
+      if (!variable) throw new Error(`Variable not found: ${variableId}`);
+      if (!("setBoundVariable" in node)) throw new Error(`Node ${node.type} does not support variable bindings`);
+
+      const paintMatch = field.match(/^(fills|strokes)\/(\d+)\/color$/);
+      if (paintMatch) {
+        const paintProp = paintMatch[1];
+        const paintIndex = parseInt(paintMatch[2], 10);
+        const paints = [...node[paintProp]];
+        if (paintIndex >= paints.length) throw new Error(`${paintProp} index ${paintIndex} out of range`);
+        const paint = Object.assign({}, paints[paintIndex]);
+        paint.boundVariables = Object.assign({}, paint.boundVariables || {});
+        paint.boundVariables.color = { type: "VARIABLE_ALIAS", id: variable.id };
+        paints[paintIndex] = paint;
+        node[paintProp] = paints;
+      } else {
+        node.setBoundVariable(field, variable);
+      }
+      results.push({ nodeId, variableId, field, success: true });
+    } catch (error) {
+      results.push({ nodeId, variableId, field, success: false, error: error.message });
+    }
+  }
+  const succeeded = results.filter(r => r.success).length;
+  return { total: bindings.length, succeeded, failed: bindings.length - succeeded, results };
+}
+
+async function bulkAddReactions(params) {
+  const { reactions } = params || {};
+  if (!reactions || !Array.isArray(reactions) || reactions.length === 0) {
+    throw new Error("Missing or empty reactions array");
+  }
+  const results = [];
+  for (const reaction of reactions) {
+    const { nodeId, trigger, navigationType, destinationId, transition, actionType, url } = reaction;
+    try {
+      if (!nodeId || !trigger) throw new Error("Each reaction requires nodeId and trigger");
+      const node = await getNodeByIdSafe(nodeId);
+      if (!node) throw new Error(`Node not found: ${nodeId}`);
+      if (!("reactions" in node)) throw new Error("Node does not support reactions");
+
+      const triggerObj = { type: trigger };
+      if (trigger === "AFTER_TIMEOUT" && reaction.triggerTimeout !== undefined) {
+        triggerObj.timeout = reaction.triggerTimeout;
+      }
+
+      let action;
+      if (actionType === "BACK" || actionType === "CLOSE") {
+        action = { type: actionType };
+      } else if (url) {
+        action = { type: "URL", url };
+      } else {
+        action = {
+          type: "NODE",
+          destinationId: destinationId || null,
+          navigation: navigationType || "NAVIGATE",
+        };
+        const builtTransition = buildTransition(transition);
+        if (builtTransition) action.transition = builtTransition;
+      }
+
+      const existingReactions = node.reactions ? [...node.reactions] : [];
+      existingReactions.push({ trigger: triggerObj, actions: [action] });
+      await node.setReactionsAsync(existingReactions);
+      results.push({ nodeId, trigger, success: true });
+    } catch (error) {
+      results.push({ nodeId, trigger, success: false, error: error.message });
+    }
+  }
+  const succeeded = results.filter(r => r.success).length;
+  return { total: reactions.length, succeeded, failed: reactions.length - succeeded, results };
 }

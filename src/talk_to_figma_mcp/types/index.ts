@@ -146,4 +146,5 @@ export type FigmaCommand =
   | "set_prototype_device"
   | "set_prototype_start_node"
   | "set_text_align"
-  | "get_image_bytes";
+  | "get_image_bytes"
+  | "find_nodes";
