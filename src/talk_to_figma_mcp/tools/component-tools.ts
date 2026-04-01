@@ -16,14 +16,16 @@ export function registerComponentTools(server: McpServer): void {
       componentKey: z.string().describe("Key of the component to instantiate"),
       x: z.number().describe("X position (local coordinates, relative to parent)"),
       y: z.number().describe("Y position (local coordinates, relative to parent)"),
+      parentId: z.string().optional().describe("ID of the parent node to place the instance in. If omitted the instance is added to the current page root."),
       channel: z.string().optional().describe("Target channel to send the command to (uses active channel if omitted)"),
     },
-    async ({ componentKey, x, y, channel }) => {
+    async ({ componentKey, x, y, parentId, channel }) => {
       try {
         const result = await sendCommandToFigma("create_component_instance", {
           componentKey,
           x,
           y,
+          parentId,
         }, { channel });
         const typedResult = result as any;
         return {
@@ -40,6 +42,37 @@ export function registerComponentTools(server: McpServer): void {
             {
               type: "text",
               text: `Error creating component instance: ${error instanceof Error ? error.message : String(error)}`,
+            },
+          ],
+        };
+      }
+    }
+  );
+
+  // Get Available Libraries Tool
+  server.tool(
+    "get_available_libraries",
+    "List all available remote libraries in the Figma team (component and variable libraries).",
+    {
+      channel: z.string().optional().describe("Target channel to send the command to (uses active channel if omitted)"),
+    },
+    async ({ channel }) => {
+      try {
+        const result = await sendCommandToFigma("get_available_libraries", {}, { channel });
+        return {
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify(result, null, 2),
+            }
+          ]
+        }
+      } catch (error) {
+        return {
+          content: [
+            {
+              type: "text",
+              text: `Error getting available libraries: ${error instanceof Error ? error.message : String(error)}`,
             },
           ],
         };

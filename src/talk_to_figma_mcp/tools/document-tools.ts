@@ -207,13 +207,15 @@ export function registerDocumentTools(server: McpServer): void {
   // Get Remote Components Tool
   server.tool(
     "get_remote_components",
-    "Get remote library components currently used in the Figma document",
+    "Get remote library components currently used in the Figma document. Optionally filter by libraryName (exact match) or nameFilter (case-insensitive substring match on component name).",
     {
+      libraryName: z.string().optional().describe("Return only components from this library (exact name match)"),
+      nameFilter: z.string().optional().describe("Case-insensitive substring to filter component names (e.g. 'Button' returns all button variants)"),
       channel: z.string().optional().describe("Target channel to send the command to (uses active channel if omitted)"),
     },
-    async ({ channel }) => {
+    async ({ libraryName, nameFilter, channel }) => {
       try {
-        const result = await sendCommandToFigma("get_remote_components", {}, { channel });
+        const result = await sendCommandToFigma("get_remote_components", { libraryName, nameFilter }, { channel });
         return {
           content: [
             {
@@ -467,6 +469,29 @@ export function registerDocumentTools(server: McpServer): void {
       const active = getCurrentChannel();
       return {
         content: [{ type: "text", text: `Left channel "${channel}". Active channel: ${active ?? 'none'}` }],
+      };
+    }
+  );
+
+  // Get Connection Status Tool
+  server.tool(
+    "get_connection_status",
+    "Check the current WebSocket connection status and active Figma channel. Use this before sending commands to verify the connection is ready.",
+    {},
+    async () => {
+      const activeChannel = getCurrentChannel();
+      const joinedChannels = [...getJoinedChannels()];
+      return {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify({
+              connected: activeChannel !== null,
+              activeChannel,
+              joinedChannels,
+            }),
+          },
+        ],
       };
     }
   );
