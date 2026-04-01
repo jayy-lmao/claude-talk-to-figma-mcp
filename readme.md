@@ -136,20 +136,56 @@ If you prefer Docker or need to run the WebSocket server in a team environment, 
 
 ## 🛠️ Capabilities
 
+**Session management**
+- Auto-discover and connect to Figma plugin sessions
+- Multi-channel support for working across multiple files
+
 **Design analysis**
-- Get document information, current selection, styles
-- Scan text, audit components, export assets
+- Get document info, selection, styles, and components
+- Scan text nodes, audit images, export assets (PNG, JPG, SVG, PDF)
+- Read annotations, layout grids, and page guides
 
 **Element creation**
 - Shapes, text, frames with full style control
-- Clone, group, organize elements
+- Clone, group, boolean operations (union, subtract, intersect, exclude)
+- Bulk create multiple nodes in a single operation
 
 **Modification**
-- Colors, borders, corners, shadows
-- Auto-layout, advanced typography
-- Local components and team library components
+- Colors, gradients, borders, corners, shadows, opacity
+- Auto-layout, rotation, z-order reordering, convert to frame
+- Layout grids on frames, guides on pages
 
-See [complete command list](COMMANDS.md).
+**Typography**
+- Full text styling: font, size, weight, spacing, alignment, case, decoration
+- Batch text updates and font fixing across subtrees
+
+**Components and design systems**
+- Create components and component sets (variants)
+- Component properties: add, get, set, link to text nodes
+- Instance creation with property and variant configuration
+- Build entire screens from component templates
+- Access both local and remote library components
+
+**Variables (design tokens)**
+- Create, read, update, delete variables and collections
+- Bind variables to node properties
+- Switch variable modes per node
+
+**Prototyping**
+- Add navigation, overlay, back/close, and URL interactions
+- Configure triggers (click, hover, drag, press, timeout)
+- Transition animations with easing control
+- Flow starting points and prototype device settings
+
+**FigJam**
+- Read board elements (stickies, connectors, shapes, sections, stamps)
+- Create stickies, shapes with text, connectors, and sections
+
+**SVG**
+- Import SVG markup as vector nodes (sanitized)
+- Export nodes as SVG strings
+
+See [complete command list](COMMANDS.md) with 117 tools across 12 categories.
 
 ## 📚 Documentation
 

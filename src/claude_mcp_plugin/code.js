@@ -6632,7 +6632,13 @@ async function addBackReaction(params) {
 
   const triggerObj = { type: trigger };
 
-  const action = { type: actionType };
+  // BACK and CLOSE actions only support type and navigation fields.
+  // The Figma Plugin API does NOT allow 'transition' on these action types.
+  const action = {
+    type: "NODE",
+    navigation: actionType,  // "BACK" or "CLOSE"
+    destinationId: null,
+  };
   const builtTransition = buildTransition(transition);
   if (builtTransition) action.transition = builtTransition;
 
@@ -6789,16 +6795,31 @@ async function setPrototypeDevice(params) {
   if (!deviceType) throw new Error("Missing deviceType parameter");
 
   const page = figma.currentPage;
+  await page.loadAsync();
 
-  if (deviceType === "NONE") {
-    page.prototypeDevice = { type: "NONE", rotation: rotation || "NONE" };
-  } else if (deviceType === "PRESET") {
-    if (!presetIdentifier) throw new Error("presetIdentifier is required when deviceType is PRESET");
-    page.prototypeDevice = {
-      type: "PRESET",
-      presetIdentifier: presetIdentifier,
-      rotation: rotation || "NONE",
-      size: page.prototypeDevice && page.prototypeDevice.size ? page.prototypeDevice.size : { width: 0, height: 0 },
+  try {
+    if (deviceType === "NONE") {
+      page.prototypeDevice = { type: "NONE", rotation: rotation || "NONE" };
+    } else if (deviceType === "PRESET") {
+      if (!presetIdentifier) throw new Error("presetIdentifier is required when deviceType is PRESET");
+      const currentSize = page.prototypeDevice && page.prototypeDevice.size
+        ? { width: page.prototypeDevice.size.width, height: page.prototypeDevice.size.height }
+        : { width: 0, height: 0 };
+      page.prototypeDevice = {
+        type: "PRESET",
+        presetIdentifier: presetIdentifier,
+        rotation: rotation || "NONE",
+        size: currentSize,
+      };
+    }
+  } catch (e) {
+    // Some Figma API versions don't support direct assignment to prototypeDevice.
+    // Return the current state and note the limitation.
+    return {
+      pageId: page.id,
+      pageName: page.name,
+      error: `Cannot set prototypeDevice: ${e.message}. This may require a newer Figma Plugin API version.`,
+      currentPrototypeDevice: page.prototypeDevice,
     };
   }
 
@@ -6816,13 +6837,39 @@ async function setPrototypeStartNode(params) {
   const { nodeId } = params;
 
   const page = figma.currentPage;
+  await page.loadAsync();
 
   if (nodeId) {
     const node = await getNodeByIdSafe(nodeId);
     if (!node) throw new Error(`Node not found with ID: ${nodeId}`);
-    page.prototypeStartNode = node;
+    try {
+      page.prototypeStartNode = node;
+    } catch (e) {
+      // Fallback: use flowStartingPoints to achieve the same effect
+      const flowStartingPoints = [...(page.flowStartingPoints || [])];
+      const existingIndex = flowStartingPoints.findIndex(fp => fp.nodeId === nodeId);
+      if (existingIndex < 0) {
+        flowStartingPoints.unshift({ nodeId, name: node.name || "Flow 1" });
+        page.flowStartingPoints = flowStartingPoints;
+      }
+      return {
+        pageId: page.id,
+        pageName: page.name,
+        prototypeStartNodeId: nodeId,
+        note: "Used flowStartingPoints as fallback (prototypeStartNode is read-only in this API version)",
+      };
+    }
   } else {
-    page.prototypeStartNode = null;
+    try {
+      page.prototypeStartNode = null;
+    } catch (e) {
+      // Cannot clear — return current state
+      return {
+        pageId: page.id,
+        pageName: page.name,
+        error: `Cannot clear prototypeStartNode: ${e.message}`,
+      };
+    }
   }
 
   return {
