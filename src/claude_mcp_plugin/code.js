@@ -1163,12 +1163,34 @@ async function createComponentInstance(params) {
         }, 10000);
       });
 
-      const importPromise = figma.importComponentByKeyAsync(componentKey);
-
-      component = await Promise.race([importPromise, timeoutPromise])
-        .finally(() => {
-          clearTimeout(timeoutId);
+      // Try importing as a single component first
+      try {
+        const importPromise = figma.importComponentByKeyAsync(componentKey);
+        component = await Promise.race([importPromise, timeoutPromise])
+          .finally(() => { clearTimeout(timeoutId); });
+      } catch (singleErr) {
+        console.log(`Not a single component, trying as component set...`);
+        // If that fails, try importing as a component set and pick the default variant
+        let timeoutId2;
+        const timeoutPromise2 = new Promise((_, reject) => {
+          timeoutId2 = setTimeout(() => {
+            reject(new Error("Timeout while importing component set (10s)."));
+          }, 10000);
         });
+        try {
+          const setImportPromise = figma.importComponentSetByKeyAsync(componentKey);
+          const componentSet = await Promise.race([setImportPromise, timeoutPromise2])
+            .finally(() => { clearTimeout(timeoutId2); });
+          if (componentSet && componentSet.type === "COMPONENT_SET" && componentSet.children.length > 0) {
+            // Pick the default variant (first child) — callers can use set_instance_variant afterwards
+            component = componentSet.defaultVariant || componentSet.children[0];
+            console.log(`Imported component set, using default variant: ${component.name}`);
+          }
+        } catch (setErr) {
+          console.log(`Component set import also failed: ${setErr.message}`);
+          throw singleErr; // Re-throw the original error
+        }
+      }
     }
 
     console.log(`Component ready, creating instance...`);
