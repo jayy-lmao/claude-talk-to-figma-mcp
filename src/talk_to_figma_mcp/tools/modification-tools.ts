@@ -234,6 +234,43 @@ export function registerModificationTools(server: McpServer): void {
     }
   );
 
+  // Rescale Node Tool
+  server.tool(
+    "rescale_node",
+    "Rescale a node and all its children proportionally in Figma. Unlike resize_node which only changes the container dimensions, rescale adjusts all descendants (text sizes, strokes, effects, nested frames, etc.) by the given scale factor.",
+    {
+      nodeId: z.string().describe("The ID of the node to rescale"),
+      scaleFactor: z.number().positive().describe("Scale factor (e.g. 0.5 = half size, 2.0 = double size)"),
+      channel: z.string().optional().describe("Target channel to send the command to (uses active channel if omitted)"),
+    },
+    async ({ nodeId, scaleFactor, channel }) => {
+      try {
+        const result = await sendCommandToFigma("rescale_node", {
+          nodeId,
+          scaleFactor,
+        }, { channel });
+        const typedResult = result as { name: string; width: number; height: number };
+        return {
+          content: [
+            {
+              type: "text",
+              text: `Rescaled node "${typedResult.name}" by factor ${scaleFactor} → ${typedResult.width}×${typedResult.height}`,
+            },
+          ],
+        };
+      } catch (error) {
+        return {
+          content: [
+            {
+              type: "text",
+              text: `Error rescaling node: ${error instanceof Error ? error.message : String(error)}`,
+            },
+          ],
+        };
+      }
+    }
+  );
+
   // Delete Node Tool
   server.tool(
     "delete_node",

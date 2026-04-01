@@ -164,10 +164,12 @@ Work with reusable design components.
 - get_available_libraries — List team libraries and their variable collections
 - get_all_components — Combined local + remote catalog with filtering (compound tool)
 - create_component_from_node / create_component_set — Create components/variants
-- create_component_instance — Instantiate by component key (supports parentId)
+- create_component_instance — Instantiate by component key (supports parentId). Accepts component set keys (default variant)
+- get_component_set_info — Discover variant axes, property definitions, and variant keys before instantiation
 - get_component_properties / set_component_property / add_component_property
 - link_component_property — Bind property to child text node
 - set_instance_variant — Switch variant without recreating
+- replace_node_with_instance — Swap a manual frame for a library component instance in one step (preserves position, size, parent, sibling order)
 
 ### Images
 Manage image fills and transforms.
@@ -255,6 +257,14 @@ For complex text replacement across designs, use the text_replacement_strategy p
 3. Inspect properties with get_component_properties
 4. Customize instances with set_component_property or set_instance_variant
 5. For building full screens, use build_screen_from_template to create an artboard and populate it with instances in one call
+
+### Design System Token Workflow
+1. Use search_design_system (Figma MCP) to find variable keys, style keys, and component keys by name
+2. Use get_component_set_info to discover variant axes, property names, and default variant key
+3. Apply color variables with bulk_apply_variables using library variable keys (auto-imported)
+4. Apply text styles with set_text_style_id using library style keys (auto-imported)
+5. Replace manual elements with replace_node_with_instance to swap frames for library component instances
+6. Scan for annotations with find_nodes (hasAnnotations: true) to discover designer notes
 
 ## Key Conventions
 

@@ -1176,4 +1176,133 @@ export function registerCompoundTools(server: McpServer): void {
       }
     }
   );
+
+  // ── Create Responsive Variants ──────────────────────────────────────────
+  // Clones a frame at multiple target widths, proportionally rescaling all
+  // children (text, strokes, effects, nested frames).  Useful for producing
+  // responsive breakpoint previews from a single source frame.
+  server.tool(
+    "create_responsive_variants",
+    "Clone a frame at multiple screen sizes, proportionally rescaling all children. Produces responsive breakpoint previews from a single source frame.",
+    {
+      sourceNodeId: z.string().describe("The ID of the source frame to duplicate"),
+      variants: z
+        .array(
+          z.object({
+            name: z.string().optional().describe("Optional name for the variant (e.g. 'Mobile 375px')"),
+            width: z.number().positive().describe("Target width for this variant"),
+            height: z.number().positive().optional().describe("Target height (defaults to proportional scaling from width)"),
+            offsetX: z.number().optional().describe("Horizontal offset from the source frame"),
+            offsetY: z.number().optional().describe("Vertical offset from the source frame"),
+          })
+        )
+        .min(1)
+        .describe("Array of variant definitions with target sizes"),
+      channel: z.string().optional().describe("Target channel to send the command to (uses active channel if omitted)"),
+    },
+    async ({ sourceNodeId, variants, channel }) => {
+      try {
+        // Get source node info for dimensions and position
+        const sourceInfo = (await sendCommandToFigma("get_node_info", { nodeId: sourceNodeId }, { channel })) as {
+          id: string;
+          name: string;
+          width: number;
+          height: number;
+          x: number;
+          y: number;
+        };
+
+        const sourceWidth = sourceInfo.width;
+        const sourceHeight = sourceInfo.height;
+        const results: Array<{ index: number; id: string; name: string; width: number; height: number; x: number; y: number }> = [];
+        const errors: Array<{ index: number; error: string }> = [];
+
+        // Track the rightmost edge for auto-spacing
+        let nextX = sourceInfo.x + sourceWidth + 100;
+
+        for (let i = 0; i < variants.length; i++) {
+          const variant = variants[i];
+          try {
+            // 1. Clone the source node
+            const cloneX = variant.offsetX !== undefined ? sourceInfo.x + variant.offsetX : nextX;
+            const cloneY = variant.offsetY !== undefined ? sourceInfo.y + variant.offsetY : sourceInfo.y;
+
+            const cloneResult = (await sendCommandToFigma("clone_node", {
+              nodeId: sourceNodeId,
+              x: cloneX,
+              y: cloneY,
+            }, { channel })) as { id: string; name: string; width: number };
+
+            // 2. Rescale proportionally based on width ratio
+            const scaleFactor = variant.width / sourceWidth;
+            await sendCommandToFigma("rescale_node", {
+              nodeId: cloneResult.id,
+              scaleFactor,
+            }, { channel });
+
+            // 3. If explicit height differs from proportional, resize to exact dimensions
+            const proportionalHeight = sourceHeight * scaleFactor;
+            if (variant.height !== undefined && Math.abs(variant.height - proportionalHeight) > 0.5) {
+              await sendCommandToFigma("resize_node", {
+                nodeId: cloneResult.id,
+                width: variant.width,
+                height: variant.height,
+              }, { channel });
+            }
+
+            // 4. Rename if requested
+            const variantName = variant.name || `${sourceInfo.name} – ${variant.width}w`;
+            await sendCommandToFigma("rename_node", {
+              nodeId: cloneResult.id,
+              name: variantName,
+            }, { channel });
+
+            // Get final dimensions
+            const finalInfo = (await sendCommandToFigma("get_node_info", { nodeId: cloneResult.id }, { channel })) as {
+              width: number;
+              height: number;
+              x: number;
+              y: number;
+            };
+
+            results.push({
+              index: i,
+              id: cloneResult.id,
+              name: variantName,
+              width: finalInfo.width,
+              height: finalInfo.height,
+              x: finalInfo.x,
+              y: finalInfo.y,
+            });
+
+            // Update nextX for auto-spacing
+            nextX = finalInfo.x + finalInfo.width + 100;
+          } catch (err) {
+            errors.push({ index: i, error: err instanceof Error ? err.message : String(err) });
+          }
+        }
+
+        const summary = [
+          `Created ${results.length} responsive variant(s) from "${sourceInfo.name}" (${sourceWidth}×${sourceHeight}):`,
+          ...results.map((r) => `  • "${r.name}" → ${r.width}×${r.height} at (${r.x}, ${r.y}) [${r.id}]`),
+          ...(errors.length > 0
+            ? [`Failed ${errors.length} variant(s):`, ...errors.map((e) => `  • index ${e.index}: ${e.error}`)]
+            : []),
+        ].join("\n");
+
+        return {
+          content: [{ type: "text", text: summary }],
+        };
+      } catch (error) {
+        return {
+          content: [
+            {
+              type: "text",
+              text: `Error creating responsive variants: ${error instanceof Error ? error.message : String(error)}`,
+            },
+          ],
+        };
+      }
+    }
+  );
 }

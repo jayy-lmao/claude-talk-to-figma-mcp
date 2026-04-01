@@ -170,6 +170,8 @@ async function handleCommand(command, params) {
       return await setTextContent(params);
     case "clone_node":
       return await cloneNode(params);
+    case "rescale_node":
+      return await rescaleNode(params);
     case "scan_text_nodes":
       return await scanTextNodes(params);
     case "set_multiple_text_contents":
@@ -1022,6 +1024,36 @@ async function resizeNode(params) {
   }
 
   node.resize(width, height);
+
+  return {
+    id: node.id,
+    name: node.name,
+    width: node.width,
+    height: node.height,
+  };
+}
+
+async function rescaleNode(params) {
+  const { nodeId, scaleFactor } = params || {};
+
+  if (!nodeId) {
+    throw new Error("Missing nodeId parameter");
+  }
+
+  if (scaleFactor === undefined || scaleFactor <= 0) {
+    throw new Error("scaleFactor must be a positive number");
+  }
+
+  const node = await getNodeByIdSafe(nodeId);
+  if (!node) {
+    throw new Error(`Node not found with ID: ${nodeId}`);
+  }
+
+  if (!("rescale" in node)) {
+    throw new Error(`Node does not support rescaling: ${nodeId}`);
+  }
+
+  node.rescale(scaleFactor);
 
   return {
     id: node.id,

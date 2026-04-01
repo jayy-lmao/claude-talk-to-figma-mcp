@@ -85,7 +85,8 @@ Complete reference of the tools available to interact with Figma.
 | `set_selection_colors` | Bulk recolor | Recursively recolor icons and child groups |
 | `set_gradient` | Gradient fills | Linear, radial, angular, or diamond gradients |
 | `move_node` | Positioning | Layout adjustments |
-| `resize_node` | Size changes | Responsive scaling |
+| `resize_node` | Size changes | Responsive scaling (container only) |
+| `rescale_node` | Proportional scaling | Scale node AND all children by a factor (text, strokes, effects, nested frames) |
 | `rotate_node` | Rotation | Rotate nodes by angle (supports relative rotation) |
 | `rename_node` | Rename node | Organize layers and components |
 | `delete_node` | Delete elements | Clean up designs |
@@ -198,6 +199,20 @@ Compound tools combine multiple operations into a single call to reduce round-tr
 | `replace_node_with_instance` | Swap node for component | Replace a manual frame with a library component instance in one step (preserves position, size, parent, sibling order) |
 | `swap_component_variant` | Batch variant swap | Change variant properties on multiple instances at once |
 | `build_screen_from_template` | Build screen | Create an artboard and populate it with component instances |
+| `create_responsive_variants` | Responsive breakpoints | Clone a frame at multiple widths with proportional scaling of all children (e.g. Mobile 375, Tablet 768, Desktop 1440) |
+
+## Design System Token Workflow
+
+To apply library design tokens (variables, styles, components) from an enabled team library:
+
+1. **Discover tokens**: Use `search_design_system` (from Figma MCP) to find variable keys, style keys, and component keys by name
+2. **Discover component variants**: Use `get_component_set_info` with the component set key to see variant axes, property names, and default variant key
+3. **Apply color variables**: Use `bulk_apply_variables` with library variable keys — they are auto-imported from enabled libraries
+4. **Apply text styles**: Use `set_text_style_id` with library style keys — they are auto-imported from enabled libraries
+5. **Replace elements with components**: Use `replace_node_with_instance` to swap manual frames for library component instances in one step
+6. **Scan for annotations**: Use `find_nodes` with `hasAnnotations: true` to discover designer notes about which library to use
+
+> **Note**: All variable, style, and component tools now accept library keys in addition to local IDs. Library assets are automatically imported from enabled team libraries when referenced by key.
 
 ## Understanding coordinate systems
 
