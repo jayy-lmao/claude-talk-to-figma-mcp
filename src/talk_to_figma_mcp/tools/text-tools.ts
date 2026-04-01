@@ -541,7 +541,7 @@ export function registerTextTools(server: McpServer): void {
   // Set Text Style ID Tool
   server.tool(
     "set_text_style_id",
-    "Apply a text style to a text node in Figma",
+    "Apply a text style to a text node in Figma. Accepts both local text style IDs and library style keys. Library styles are automatically imported.",
     {
       nodeId: z.string().describe("The ID of the text node to modify"),
       textStyleId: z.string().describe("The ID of the text style to apply"),

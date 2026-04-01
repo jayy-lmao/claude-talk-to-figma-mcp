@@ -11,7 +11,7 @@ export function registerComponentTools(server: McpServer): void {
   // Create Component Instance Tool
   server.tool(
     "create_component_instance",
-    "Create an instance of a component in Figma",
+    "Create an instance of a component in Figma. Accepts both individual component keys and component set keys. For component sets, the default variant is instantiated.",
     {
       componentKey: z.string().describe("Key of the component to instantiate"),
       x: z.number().describe("X position (local coordinates, relative to parent)"),

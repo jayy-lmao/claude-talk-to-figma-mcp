@@ -509,13 +509,55 @@ export function registerCompoundTools(server: McpServer): void {
     }
   );
 
+  // ── Get Component Set Info ─────────────────────────────────────────────────
+  // Discovers variant axes, property definitions, and individual variant keys
+  // for a component set *before* instantiation — avoids throwaway-instance
+  // round-trips.
+  server.tool(
+    "get_component_set_info",
+    "Get variant axes, property definitions, and individual variant keys for a component set. Use this before create_instance_with_properties to discover the correct variant and property names. Accepts either a component set key or an individual component key.",
+    {
+      componentKey: z
+        .string()
+        .describe("Key of the component or component set (from get_all_components or design system search)"),
+      channel: z.string().optional().describe("Target channel to send the command to (uses active channel if omitted)"),
+    },
+    async ({ componentKey, channel }) => {
+      try {
+        const result = await sendCommandToFigma(
+          "get_component_set_info",
+          { componentKey },
+          { channel }
+        );
+
+        return {
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify(result, null, 2),
+            },
+          ],
+        };
+      } catch (error) {
+        return {
+          content: [
+            {
+              type: "text",
+              text: `Error getting component set info: ${error instanceof Error ? error.message : String(error)}`,
+            },
+          ],
+        };
+      }
+    }
+  );
+
   // ── Create Instance with Properties ──────────────────────────────────────
   // Combines create_component_instance + set_component_property + set_instance_variant
   // into a single call. This is the most common component workflow: place an
   // instance and immediately configure its inputs (text, boolean, variant).
   server.tool(
     "create_instance_with_properties",
-    "Place a component instance in Figma and immediately configure its properties and/or variant in a single operation. Combines create_component_instance, set_component_property, and set_instance_variant. Use get_all_components to find component keys.",
+    "Place a component instance in Figma and immediately configure its properties and/or variant in a single operation. Combines create_component_instance, set_component_property, and set_instance_variant. Use get_all_components to find component keys. Accepts both individual component keys and component set keys. For component sets, the default variant is instantiated. Use get_component_set_info first to discover variant axes and property names.",
     {
       componentKey: z
         .string()
@@ -954,7 +996,7 @@ export function registerCompoundTools(server: McpServer): void {
   // ── Bulk Apply Variables ────────────────────────────────────────────
   server.tool(
     "bulk_apply_variables",
-    "Bind Figma variables to multiple nodes in a single operation. Each binding specifies a node, variable, and field (e.g. 'fills/0/color'). Ideal for applying design tokens across a frame.",
+    "Bind Figma variables to multiple nodes in a single operation. Each binding specifies a node, variable, and field (e.g. 'fills/0/color'). Ideal for applying design tokens across a frame. Accepts both local variable IDs and library variable keys. Library variables are automatically imported.",
     {
       bindings: z.array(z.object({
         nodeId: z.string().describe("ID of the node to bind the variable to"),
@@ -1027,6 +1069,107 @@ export function registerCompoundTools(server: McpServer): void {
             {
               type: "text",
               text: `Error bulk adding reactions: ${error instanceof Error ? error.message : String(error)}`,
+            },
+          ],
+        };
+      }
+    }
+  );
+
+  // ── Replace Node with Instance ─────────────────────────────────────────
+  // Replaces an existing node (e.g. a manually built frame) with a library
+  // component instance in a single operation. This handles component import,
+  // instance creation, position/size matching, parent re-insertion at the
+  // same sibling index, and deletion of the old node — all server-side in
+  // one round-trip. Follow-up variant and property overrides are applied
+  // via separate commands if provided.
+  server.tool(
+    "replace_node_with_instance",
+    "Replace an existing node with a component instance in a single operation. The new instance is placed at the same position and sibling index as the original node, optionally resized to match its dimensions. The original node is deleted. Use get_all_components to find component keys. Variant and component property overrides can be applied in the same call.",
+    {
+      targetNodeId: z
+        .string()
+        .describe("ID of the node to replace"),
+      componentKey: z
+        .string()
+        .describe("Key of the component (or component set) to instantiate (from get_all_components)"),
+      variantProperties: z
+        .record(z.string())
+        .optional()
+        .describe(
+          "Variant properties to set on the new instance (e.g. { \"State\": \"Hover\", \"Size\": \"Large\" })"
+        ),
+      componentProperties: z
+        .record(z.union([z.string(), z.boolean()]))
+        .optional()
+        .describe(
+          "Component property overrides as key→value pairs (e.g. { \"Label#1234:0\": \"Sign up\", \"Show Icon#1234:1\": true }). Keys come from get_component_properties."
+        ),
+      matchSize: z
+        .boolean()
+        .optional()
+        .describe("Resize the new instance to match the target node's dimensions (default: true)"),
+      channel: z.string().optional().describe("Target channel to send the command to (uses active channel if omitted)"),
+    },
+    async ({ targetNodeId, componentKey, variantProperties, componentProperties, matchSize, channel }) => {
+      try {
+        // Step 1: Replace the node server-side (handles import, create, position, resize, reparent, delete)
+        const result = await sendCommandToFigma("replace_node_with_instance", {
+          targetNodeId,
+          componentKey,
+          matchSize: matchSize !== undefined ? matchSize : true,
+        }, { channel });
+        const typedResult = result as {
+          id: string;
+          name: string;
+          x: number;
+          y: number;
+          width: number;
+          height: number;
+          componentId: string | null;
+          replacedNodeId: string;
+          parentId: string;
+          siblingIndex: number;
+        };
+        const instanceId = typedResult.id;
+
+        const applied: string[] = [];
+
+        // Step 2: Apply variant properties if provided
+        if (variantProperties && Object.keys(variantProperties).length > 0) {
+          await sendCommandToFigma("set_instance_variant", {
+            nodeId: instanceId,
+            properties: variantProperties,
+          }, { channel });
+          applied.push(`variantProperties: ${JSON.stringify(variantProperties)}`);
+        }
+
+        // Step 3: Apply component property overrides if provided
+        if (componentProperties && Object.keys(componentProperties).length > 0) {
+          await sendCommandToFigma("set_component_property", {
+            nodeId: instanceId,
+            properties: componentProperties,
+          }, { channel });
+          applied.push(`componentProperties: ${JSON.stringify(componentProperties)}`);
+        }
+
+        const propertySummary =
+          applied.length > 0 ? `\nApplied: ${applied.join("; ")}` : "";
+
+        return {
+          content: [
+            {
+              type: "text",
+              text: `Replaced node ${typedResult.replacedNodeId} with instance "${typedResult.name}" (ID: ${instanceId}) at (${typedResult.x}, ${typedResult.y}), size ${typedResult.width}×${typedResult.height}. Parent: ${typedResult.parentId}, index: ${typedResult.siblingIndex}.${propertySummary}`,
+            },
+          ],
+        };
+      } catch (error) {
+        return {
+          content: [
+            {
+              type: "text",
+              text: `Error replacing node with instance: ${error instanceof Error ? error.message : String(error)}`,
             },
           ],
         };

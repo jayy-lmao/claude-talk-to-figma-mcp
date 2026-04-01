@@ -12,8 +12,10 @@ export function registerVariableTools(server: McpServer): void {
   server.tool(
     "get_variables",
     "List all variable collections and their variables in the current Figma file. Returns collections with their modes and variables.",
-    {},
-    async () => {
+    {
+      channel: z.string().optional().describe("Target channel to send the command to (uses active channel if omitted)"),
+    },
+    async ({ channel }) => {
       try {
         const result = await sendCommandToFigma("get_variables", {}, { channel });
         const typedResult = result as { collections: any[] };
@@ -86,7 +88,7 @@ export function registerVariableTools(server: McpServer): void {
   // Apply Variable to Node Tool
   server.tool(
     "apply_variable_to_node",
-    "Bind a variable to a node property in Figma. Call once per field — for multiple fields, call multiple times.",
+    "Bind a variable to a node property in Figma. Call once per field — for multiple fields, call multiple times. Accepts both local variable IDs and library variable keys. Library variables are automatically imported.",
     {
       nodeId: z.string().describe("The ID of the node to bind the variable to"),
       variableId: z.string().describe("The ID of the variable to bind"),
@@ -125,7 +127,7 @@ export function registerVariableTools(server: McpServer): void {
   // Delete Variable Tool
   server.tool(
     "delete_variable",
-    "Delete a variable by its ID. Use get_variables first to find the variable ID.",
+    "Delete a variable by its ID or library key. Use get_variables first to find the variable ID. Accepts both local variable IDs and library variable keys.",
     {
       variableId: z.string().describe("The ID of the variable to delete (e.g., 'VariableID:34:4353')"),
       channel: z.string().optional().describe("Target channel to send the command to (uses active channel if omitted)"),

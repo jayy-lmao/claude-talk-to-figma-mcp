@@ -237,6 +237,8 @@ async function handleCommand(command, params) {
       return await addComponentProperty(params);
     case "get_component_properties":
       return await getComponentProperties(params);
+    case "get_component_set_info":
+      return await getComponentSetInfo(params);
     case "set_component_property":
       return await setComponentProperty(params);
     case "create_page":
@@ -356,6 +358,8 @@ async function handleCommand(command, params) {
     // ── Search commands ──────────────────────────────────────────────────
     case "find_nodes":
       return await findNodes(params);
+    case "replace_node_with_instance":
+      return await replaceNodeWithInstance(params);
     default:
       throw new Error(`Unknown command: ${command}`);
   }
@@ -448,6 +452,10 @@ async function getNodeInfo(nodeId) {
     };
   }
 
+  // Add parent info for discovering parent-child relationships
+  doc.parentId = node.parent ? node.parent.id : null;
+  doc.parentName = node.parent ? node.parent.name : null;
+
   return doc;
 }
 
@@ -475,6 +483,9 @@ async function getNodesInfo(nodeIds) {
             y: node.y
           };
         }
+        // Add parent info for discovering parent-child relationships
+        doc.parentId = node.parent ? node.parent.id : null;
+        doc.parentName = node.parent ? node.parent.name : null;
         return {
           nodeId: node.id,
           document: doc,
@@ -1234,6 +1245,124 @@ async function createComponentInstance(params) {
       throw new Error(`Error creating component instance: ${msg}`);
     }
   }
+}
+
+async function replaceNodeWithInstance(params) {
+  const { targetNodeId, componentKey, matchSize = true } = params || {};
+
+  if (!targetNodeId) {
+    throw new Error("Missing targetNodeId parameter");
+  }
+  if (!componentKey) {
+    throw new Error("Missing componentKey parameter");
+  }
+
+  // Step 1: Get the target node and record its parent, index, position, and size
+  const targetNode = await getNodeByIdSafe(targetNodeId);
+  if (!targetNode) {
+    throw new Error(`Target node not found with ID: ${targetNodeId}`);
+  }
+
+  const parent = targetNode.parent;
+  if (!parent || !("children" in parent)) {
+    throw new Error("Target node has no parent container — cannot replace a root node");
+  }
+
+  const siblingIndex = parent.children.indexOf(targetNode);
+  const targetX = "x" in targetNode ? targetNode.x : 0;
+  const targetY = "y" in targetNode ? targetNode.y : 0;
+  const targetWidth = "width" in targetNode ? targetNode.width : null;
+  const targetHeight = "height" in targetNode ? targetNode.height : null;
+
+  // Step 2: Import the component (same fallback pattern as createComponentInstance)
+  let component = null;
+
+  // Try to find the component locally first
+  try {
+    const currentPageComponents = figma.currentPage.findAllWithCriteria({
+      types: ["COMPONENT"]
+    });
+    component = currentPageComponents.find(c => c.key === componentKey);
+
+    if (!component) {
+      await figma.loadAllPagesAsync();
+      const allComponents = figma.root.findAllWithCriteria({
+        types: ["COMPONENT"]
+      });
+      component = allComponents.find(c => c.key === componentKey);
+    }
+  } catch (findError) {
+    console.log(`Error searching locally for component: ${findError.message}`);
+  }
+
+  // If not found locally, try importing
+  if (!component) {
+    let timeoutId;
+    const timeoutPromise = new Promise((_, reject) => {
+      timeoutId = setTimeout(() => {
+        reject(new Error("Timeout while importing component (10s). The component may be in a team library you don't have access to."));
+      }, 10000);
+    });
+
+    try {
+      const importPromise = figma.importComponentByKeyAsync(componentKey);
+      component = await Promise.race([importPromise, timeoutPromise])
+        .finally(() => { clearTimeout(timeoutId); });
+    } catch (singleErr) {
+      // Try importing as a component set and pick the default variant
+      let timeoutId2;
+      const timeoutPromise2 = new Promise((_, reject) => {
+        timeoutId2 = setTimeout(() => {
+          reject(new Error("Timeout while importing component set (10s)."));
+        }, 10000);
+      });
+      try {
+        const setImportPromise = figma.importComponentSetByKeyAsync(componentKey);
+        const componentSet = await Promise.race([setImportPromise, timeoutPromise2])
+          .finally(() => { clearTimeout(timeoutId2); });
+        if (componentSet && componentSet.type === "COMPONENT_SET" && componentSet.children.length > 0) {
+          component = componentSet.defaultVariant || componentSet.children[0];
+        }
+      } catch (setErr) {
+        throw singleErr;
+      }
+    }
+  }
+
+  if (!component) {
+    throw new Error(`Component with key "${componentKey}" could not be found or imported.`);
+  }
+
+  // Step 3: Create instance
+  const instance = component.createInstance();
+
+  // Step 4: Set position to match target
+  instance.x = targetX;
+  instance.y = targetY;
+
+  // Step 5: If matchSize and target had dimensions, resize instance
+  if (matchSize && targetWidth !== null && targetHeight !== null) {
+    instance.resize(targetWidth, targetHeight);
+  }
+
+  // Step 6: Insert into the same parent at the same index
+  parent.insertChild(siblingIndex, instance);
+
+  // Step 7: Remove the old target node
+  targetNode.remove();
+
+  return {
+    id: instance.id,
+    name: instance.name,
+    x: instance.x,
+    y: instance.y,
+    width: instance.width,
+    height: instance.height,
+    componentId: instance.componentId || null,
+    replacedNodeId: targetNodeId,
+    parentId: parent.id,
+    siblingIndex: siblingIndex,
+  };
 }
 
 async function exportNodeAsImage(params) {
@@ -4404,6 +4533,114 @@ async function getComponentProperties(params) {
   }
 }
 
+// Get component set info (variant axes, property definitions, variant keys)
+// Accepts either a component set key or an individual component key.
+async function getComponentSetInfo(params) {
+  const { componentKey } = params || {};
+
+  if (!componentKey) {
+    throw new Error("Missing componentKey parameter");
+  }
+
+  let component = null;
+  let componentSet = null;
+
+  // Try importing as a single component first
+  try {
+    component = await figma.importComponentByKeyAsync(componentKey);
+    console.log(`Imported component: ${component.name} (type: ${component.type})`);
+
+    // If this component belongs to a component set, get the parent set
+    if (component.parent && component.parent.type === "COMPONENT_SET") {
+      componentSet = component.parent;
+      console.log(`Component belongs to set: ${componentSet.name}`);
+    }
+  } catch (singleErr) {
+    console.log(`Not a single component key, trying as component set: ${singleErr.message}`);
+    // Try importing as a component set directly
+    try {
+      componentSet = await figma.importComponentSetByKeyAsync(componentKey);
+      console.log(`Imported component set: ${componentSet.name}`);
+    } catch (setErr) {
+      throw new Error(`Could not import "${componentKey}" as a component or component set. Component error: ${singleErr.message}. Set error: ${setErr.message}`);
+    }
+  }
+
+  // If we have a component set, return full variant info
+  if (componentSet && componentSet.type === "COMPONENT_SET") {
+    // Build variant properties map: axis name -> array of possible values
+    const variantProperties = {};
+    if (componentSet.variantGroupProperties) {
+      // variantGroupProperties is Map<string, { values: string[] }>
+      for (const [axis, def] of Object.entries(componentSet.variantGroupProperties)) {
+        variantProperties[axis] = def.values || [];
+      }
+    } else {
+      // Fallback: derive from children's variantProperties
+      for (const child of componentSet.children) {
+        if (child.variantProperties) {
+          for (const [axis, value] of Object.entries(child.variantProperties)) {
+            if (!variantProperties[axis]) {
+              variantProperties[axis] = [];
+            }
+            if (!variantProperties[axis].includes(value)) {
+              variantProperties[axis].push(value);
+            }
+          }
+        }
+      }
+    }
+
+    // Get component property definitions from the default variant
+    const defaultVariant = componentSet.defaultVariant || componentSet.children[0];
+    const componentProperties = {};
+    if (defaultVariant && defaultVariant.componentPropertyDefinitions) {
+      for (const [key, def] of Object.entries(defaultVariant.componentPropertyDefinitions)) {
+        componentProperties[key] = {
+          type: def.type,
+          defaultValue: def.defaultValue
+        };
+      }
+    }
+
+    // Build variants array
+    const variants = componentSet.children.map(child => ({
+      name: child.name,
+      key: child.key,
+      variantProperties: child.variantProperties || {}
+    }));
+
+    return {
+      isComponentSet: true,
+      name: componentSet.name,
+      key: componentSet.key,
+      variantProperties,
+      componentProperties,
+      defaultVariantKey: defaultVariant ? defaultVariant.key : null,
+      variants
+    };
+  }
+
+  // Single component (not part of a set)
+  const componentProperties = {};
+  if (component.componentPropertyDefinitions) {
+    for (const [key, def] of Object.entries(component.componentPropertyDefinitions)) {
+      componentProperties[key] = {
+        type: def.type,
+        defaultValue: def.defaultValue
+      };
+    }
+  }
+
+  return {
+    isComponentSet: false,
+    name: component.name,
+    key: component.key,
+    componentProperties,
+    variantProperties: component.variantProperties || null
+  };
+}
+
 // Set a component property value on an instance
 async function setComponentProperty(params) {
   const { nodeId, properties } = params || {};
@@ -5753,7 +5990,8 @@ async function findNodes(params) {
       // Component name filter (INSTANCE nodes)
       if (componentName) {
         if (node.type !== "INSTANCE") continue;
-        const mainName = node.mainComponent ? node.mainComponent.name : "";
+        const mainComp = await node.getMainComponentAsync();
+        const mainName = mainComp ? mainComp.name : "";
         if (!mainName.toLowerCase().includes(componentName.toLowerCase())) {
           continue;
         }
@@ -5802,8 +6040,11 @@ async function findNodes(params) {
       }
 
       // Include component info for INSTANCE nodes
-      if (node.type === "INSTANCE" && node.mainComponent) {
-        entry.componentName = node.mainComponent.name;
+      if (node.type === "INSTANCE") {
+        const mainComp = await node.getMainComponentAsync();
+        if (mainComp) {
+          entry.componentName = mainComp.name;
+        }
       }
 
       matches.push(entry);

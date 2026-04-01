@@ -20,7 +20,7 @@ Complete reference of the tools available to interact with Figma.
 |---------|---------|---------------|
 | `get_document_info` | Document analysis | Get project overview |
 | `get_selection` | Current selection | What is currently selected |
-| `get_node_info` | Element details | Inspect a specific component |
+| `get_node_info` | Element details | Inspect a specific component (includes parentId and parentName) |
 | `get_nodes_info` | Multiple elements info | Batch inspection |
 | `scan_text_nodes` | Find all text nodes | Text audit and update |
 | `get_styles` | Document styles | Color and text style audit |
@@ -123,7 +123,7 @@ Complete reference of the tools available to interact with Figma.
 | `set_font_name` | Typography | Apply brand font (family + style) |
 | `set_font_size` | Text size | Create hierarchy |
 | `set_font_weight` | Text weight | Bold/light variations |
-| `set_text_style_id` | Apply text style | Use corporate typography |
+| `set_text_style_id` | Apply text style | Use corporate typography. Accepts local IDs and library style keys (auto-imported) |
 | `set_letter_spacing` | Character spacing | Typography fine-tuning (pixels or percent) |
 | `set_line_height` | Vertical spacing | Text readability (pixels, percent, or auto) |
 | `set_paragraph_spacing` | Paragraph spacing | Content structure |
@@ -137,7 +137,7 @@ Complete reference of the tools available to interact with Figma.
 
 | Command | Purpose | Usage example |
 |---------|---------|---------------|
-| `create_component_instance` | Use components | Place component instances by key |
+| `create_component_instance` | Use components | Place component instances by key. Accepts component set keys (default variant) |
 | `create_component_from_node` | Create component | Convert existing node into a reusable component |
 | `create_component_set` | Create variants | Combine multiple components into a component set |
 | `add_component_property` | Add property | Add text, boolean, instance swap, or variant properties |
@@ -152,8 +152,8 @@ Complete reference of the tools available to interact with Figma.
 |---------|---------|---------------|
 | `get_variables` | List variables | Get all variable collections, modes, and values |
 | `set_variable` | Create/update variable | Define COLOR, FLOAT, STRING, or BOOLEAN variables |
-| `apply_variable_to_node` | Bind variable | Bind a variable to a node property field |
-| `delete_variable` | Delete variable | Remove a variable by ID |
+| `apply_variable_to_node` | Bind variable | Bind a variable to a node property field. Accepts local IDs and library variable keys (auto-imported) |
+| `delete_variable` | Delete variable | Remove a variable by ID or library key |
 | `delete_variable_collection` | Delete collection | Remove an entire collection and all its variables |
 | `switch_variable_mode` | Switch mode | Change which mode's values are used on a node |
 
@@ -193,7 +193,9 @@ Compound tools combine multiple operations into a single call to reduce round-tr
 | `bulk_create_nodes` | Batch create | Create multiple rectangles, frames, text, and ellipses in one call |
 | `bulk_update_text` | Batch text update | Update text on multiple nodes with per-node error reporting |
 | `get_all_components` | Full component catalog | List all local and remote components (supports filtering) |
-| `create_instance_with_properties` | Place + configure | Create an instance and set properties/variants in one step |
+| `create_instance_with_properties` | Place + configure | Create an instance and set properties/variants in one step. Accepts component set keys. Use get_component_set_info first to discover variant axes |
+| `get_component_set_info` | Variant discovery | Get variant axes, property definitions, and variant keys for a component set before instantiation |
+| `replace_node_with_instance` | Swap node for component | Replace a manual frame with a library component instance in one step (preserves position, size, parent, sibling order) |
 | `swap_component_variant` | Batch variant swap | Change variant properties on multiple instances at once |
 | `build_screen_from_template` | Build screen | Create an artboard and populate it with component instances |
 

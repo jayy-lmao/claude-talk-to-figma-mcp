@@ -74,7 +74,7 @@ export function registerDocumentTools(server: McpServer): void {
   // Node Info Tool
   server.tool(
     "get_node_info",
-    "Get detailed information about a specific node in Figma",
+    "Get detailed information about a specific node in Figma. Response includes parentId and parentName for traversing the node hierarchy.",
     {
       nodeId: z.string().describe("The ID of the node to get information about"),
       channel: z.string().optional().describe("Target channel to send the command to (uses active channel if omitted)"),
