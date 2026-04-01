@@ -6632,15 +6632,9 @@ async function addBackReaction(params) {
 
   const triggerObj = { type: trigger };
 
-  // BACK and CLOSE actions only support type and navigation fields.
-  // The Figma Plugin API does NOT allow 'transition' on these action types.
-  const action = {
-    type: "NODE",
-    navigation: actionType,  // "BACK" or "CLOSE"
-    destinationId: null,
-  };
-  const builtTransition = buildTransition(transition);
-  if (builtTransition) action.transition = builtTransition;
+  // BACK and CLOSE are standalone action types — only { type: "BACK" } or { type: "CLOSE" }.
+  // No navigation, destinationId, or transition fields are allowed.
+  const action = { type: actionType };
 
   const existingReactions = node.reactions ? [...node.reactions] : [];
   existingReactions.push({

@@ -104,9 +104,15 @@ The ClaudeTalkToFigma MCP server must be configured. The Figma plugin must be op
 
 ## Tool Categories
 
+### Session & Connection
+Discover, connect, and manage communication channels.
+- list_sessions / auto_join_session — Discover and connect to active Figma plugin sessions
+- join_channel — Connect to a specific channel by ID
+- set_active_channel / list_channels / leave_channel — Multi-channel management
+- get_connection_status — Verify WebSocket connection before sending commands
+
 ### Document & Navigation
 Read document structure, manage pages, inspect nodes.
-- list_sessions / auto_join_session — Discover and connect to active Figma plugin sessions
 - get_document_info — Document metadata overview
 - get_selection — Current user selection
 - get_node_info / get_nodes_info — Inspect specific nodes (batch with get_nodes_info for efficiency)
@@ -154,9 +160,10 @@ Modify text content and typography.
 
 ### Components
 Work with reusable design components.
-- get_local_components / get_remote_components — List available components
+- get_local_components / get_remote_components — List available components (remote supports libraryName and nameFilter)
+- get_all_components — Combined local + remote catalog with filtering (compound tool)
 - create_component_from_node / create_component_set — Create components/variants
-- create_component_instance — Instantiate by component key
+- create_component_instance — Instantiate by component key (supports parentId)
 - get_component_properties / set_component_property / add_component_property
 - link_component_property — Bind property to child text node
 - set_instance_variant — Switch variant without recreating
@@ -196,6 +203,21 @@ Create interactive prototype flows.
 - get_flow_starting_points / set_flow_starting_point
 - set_prototype_device / set_prototype_start_node
 
+### Compound Tools (Batch Operations)
+Combine multiple operations to reduce round-trips.
+- create_frame_with_autolayout — Create frame + configure auto-layout in one step
+- set_node_appearance — Set fill, stroke, corner radius, opacity at once
+- bulk_create_nodes — Create multiple rectangles/frames/text/ellipses in one call
+- bulk_update_text — Update text on multiple nodes with per-node error reporting
+- get_all_components — Full local + remote component catalog with filtering
+- create_instance_with_properties — Place instance + set properties/variants in one step
+- swap_component_variant — Batch change variants on multiple instances
+- build_screen_from_template — Create artboard + populate with component instances
+
+## Multi-Channel Support
+
+All tools accept an optional \`channel\` parameter to target a specific joined channel. If omitted, commands go to the active channel. Use set_active_channel to switch between joined channels.
+
 ## Core Workflows
 
 ### Reading a Design
@@ -220,10 +242,11 @@ For complex text replacement across designs, use the text_replacement_strategy p
 4. Verify each chunk with export_node_as_image
 
 ### Component Workflow
-1. List available components with get_local_components or get_remote_components
-2. Create instances with create_component_instance using the component key
+1. List available components with get_all_components (or get_local_components / get_remote_components separately)
+2. Create instances with create_component_instance or create_instance_with_properties (compound: place + configure in one step)
 3. Inspect properties with get_component_properties
 4. Customize instances with set_component_property or set_instance_variant
+5. For building full screens, use build_screen_from_template to create an artboard and populate it with instances in one call
 
 ## Key Conventions
 
@@ -274,17 +297,25 @@ Create parent frames first, then add child elements. For forms/login screens:
 
 ## Element Creation
 
-- Use create_frame() for containers and input fields
+- Use create_frame() for containers and input fields (or create_frame_with_autolayout for frames with layout)
 - Use create_text() for labels, buttons text, and links
+- Use bulk_create_nodes() to create multiple elements in one call
 - Set appropriate colors and styles:
   - Use fillColor for backgrounds
   - Use strokeColor for borders
   - Set proper fontWeight for different text elements
 
+## Building Screens from Components
+
+When a design system is available:
+1. Use get_all_components() to discover available components
+2. Use build_screen_from_template() to create an artboard and populate it with instances in one call
+3. Use create_instance_with_properties() for placing individual instances with property/variant configuration
+
 ## Modifying Existing Elements
 
-- Use set_text_content() to modify text content
-- Use set_fill_color() and set_stroke_color() for color changes
+- Use set_text_content() to modify text content (or bulk_update_text for batch)
+- Use set_fill_color() and set_stroke_color() for color changes (or set_node_appearance for multiple properties at once)
 - Use set_auto_layout() to configure flex-like layouts
 
 ## Visual Hierarchy
@@ -467,6 +498,16 @@ list_sessions — List active Figma plugin sessions. Returns channel IDs, docume
 
 auto_join_session — Automatically connect to a Figma session. If one session is active, joins directly. If multiple, returns the list. No parameters.
 
+set_active_channel — Switch the active channel for sending commands.
+  channel (string, required) — Must already be joined via join_channel
+
+list_channels — List all joined channels and which is active. No parameters.
+
+leave_channel — Leave a previously joined channel.
+  channel (string, required)
+
+get_connection_status — Check WebSocket connection and active channel. No parameters.
+
 get_document_info — Get document metadata. No parameters.
 
 get_selection — Get current selection in Figma. No parameters.
@@ -485,7 +526,9 @@ get_styles — Get all document styles. No parameters.
 
 get_local_components — Get all local components. No parameters.
 
-get_remote_components — Get remote library components in use. No parameters.
+get_remote_components — Get remote library components in use.
+  libraryName (string, optional) — Filter by exact library name
+  nameFilter (string, optional) — Case-insensitive substring filter on component name
 
 get_pages — List all pages. No parameters.
 
@@ -775,8 +818,9 @@ load_font_async — Pre-load a font before modifying text.
 ## Component Tools
 
 create_component_instance
-  componentKey (string, required) — Component key (from get_local_components)
+  componentKey (string, required) — Component key (from get_local_components or get_all_components)
   x, y (number, required)
+  parentId (string, optional) — Parent node to place the instance in
 
 create_component_from_node
   nodeId (string, required) — Node to convert
@@ -972,4 +1016,62 @@ set_prototype_device
   rotation (enum: NONE/CCW_90, optional)
 
 set_prototype_start_node
-  nodeId (string, optional) — Omit to clear`;
+  nodeId (string, optional) — Omit to clear
+
+## Compound Tools (Batch Operations)
+
+All compound tools combine multiple operations into a single call to reduce round-trips.
+
+create_frame_with_autolayout — Create frame + auto-layout in one step.
+  x, y, width, height (number, required)
+  name, parentId, fillColor, strokeColor, strokeWeight (same as create_frame)
+  layoutMode (enum: HORIZONTAL/VERTICAL/NONE, required)
+  paddingTop, paddingBottom, paddingLeft, paddingRight, itemSpacing (number, optional)
+  primaryAxisAlignItems, counterAxisAlignItems, layoutWrap, strokesIncludedInLayout (same as set_auto_layout)
+
+set_node_appearance — Set fill, stroke, corner radius, and opacity in one call. Only provided properties change.
+  nodeId (string, required)
+  fillColor ({r,g,b,a?}, optional)
+  strokeColor ({r,g,b,a?}, optional)
+  strokeWeight (number, optional)
+  cornerRadius (number, optional)
+  opacity (number 0-1, optional)
+
+bulk_create_nodes — Create multiple nodes of various types.
+  nodes (array, min 1, required) — Each has type (rectangle/frame/text/ellipse) + type-specific params
+  Returns: ID and name of every created node, plus errors for any that failed
+
+bulk_update_text — Update text on multiple nodes.
+  updates (array, min 1, required) — Each: {nodeId: string, text: string}
+  Returns: Per-node success/failure without aborting
+
+get_all_components — List all local + remote components.
+  filter (string, optional) — Case-insensitive name filter
+  includeRemote (boolean, optional, default: true)
+
+create_instance_with_properties — Place instance + configure in one step.
+  componentKey (string, required)
+  x, y (number, required)
+  parentId (string, optional)
+  componentProperties (Record<string, string|boolean>, optional) — Property overrides
+  variantProperties (Record<string, string>, optional) — Variant properties
+
+swap_component_variant — Batch change variants on multiple instances.
+  updates (array, min 1, required) — Each: {nodeId: string, variantProperties: Record<string, string>}
+
+build_screen_from_template — Create artboard + populate with component instances.
+  screenName (string, required)
+  x, y, width, height (number, required)
+  fillColor ({r,g,b,a?}, optional)
+  layoutMode (enum: HORIZONTAL/VERTICAL/NONE, optional)
+  paddingTop, paddingBottom, paddingLeft, paddingRight, itemSpacing (number, optional)
+  components (array, required) — Each:
+    componentKey (string, required)
+    x, y (number, required)
+    name (string, optional)
+    componentProperties (Record<string, string|boolean>, optional)
+    variantProperties (Record<string, string>, optional)
+
+## Note on Channel Parameter
+
+Every tool accepts an optional \`channel\` (string) parameter to target a specific joined channel. If omitted, the active channel is used. Use set_active_channel to switch between joined channels.`;

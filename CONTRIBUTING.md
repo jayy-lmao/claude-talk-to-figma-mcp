@@ -33,13 +33,22 @@ Thank you for your interest in contributing to Claude Talk to Figma MCP.
 src/
   talk_to_figma_mcp/        # MCP server implementation
     server.ts               # Main entry point
-    tools/                  # Tool categories
-      document-tools.ts     # Document interaction
-      creation-tools.ts     # Shape and element creation
-      modification-tools.ts # Property modification
-      text-tools.ts         # Text manipulation
+    tools/                  # Tool categories (12 modules, 117 tools)
+      index.ts              # Registers all tool modules
+      document-tools.ts     # Document info, pages, sessions, channels
+      creation-tools.ts     # Shapes, frames, text, groups, booleans
+      modification-tools.ts # Colors, gradients, layout, grids, annotations
+      text-tools.ts         # Text content, fonts, styling, alignment
+      component-tools.ts    # Components, variants, properties
+      image-tools.ts        # Image fills, transforms, filters
+      svg-tools.ts          # SVG import and export
+      variable-tools.ts     # Variables (design tokens) and modes
+      prototyping-tools.ts  # Reactions, flows, prototype device
+      figjam-tools.ts       # Stickies, connectors, shapes, sections
+      compound-tools.ts     # Batch operations, screen building
     utils/                  # Shared utilities
     types/                  # TypeScript definitions
+    config/                 # Configuration (CLI args, ports)
   claude_mcp_plugin/        # Figma plugin
     code.js                 # Plugin implementation
     manifest.json           # Plugin configuration
