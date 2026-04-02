@@ -272,6 +272,9 @@
             channel: null,
             metadata: {},
             heartbeatInterval: null,
+            userDisconnect: false,
+            reconnectAttempts: 0,
+            reconnectTimer: null,
           };
 
           // Cache DOM elements
@@ -367,6 +370,7 @@
                 if (data.type === "system") {
                   if (data.message && data.message.result) {
                     this.state.connected = true;
+                    this.state.reconnectAttempts = 0;
                     const channelName = data.channel;
                     this.updateStatus(
                       true,
@@ -404,14 +408,20 @@
             this.state.socket.onclose = () => {
               this.state.connected = false;
               this.state.socket = null;
-              this.updateStatus(false, "Disconnected from server…<br>Try to reconnect clicking the button");
+              this.stopHeartbeat();
+
+              if (this.state.userDisconnect) {
+                this.state.userDisconnect = false;
+                this.state.reconnectAttempts = 0;
+                this.updateStatus(false, "Disconnected from server");
+              } else {
+                this.scheduleReconnect();
+              }
             };
 
             this.state.socket.onerror = (error) => {
               console.error("WebSocket error:", error);
-              this.updateStatus(false, "Connection error");
-              this.state.connected = false;
-              this.state.socket = null;
+              // onclose will fire after onerror, reconnect is handled there
             };
           } catch (error) {
             console.error("Connection error:", error);
@@ -427,13 +437,51 @@
          */
         disconnect() {
           this.stopHeartbeat();
+          this.cancelReconnect();
           if (this.state.socket) {
+            this.state.userDisconnect = true;
             this.updateStatus(false, "Disconnecting...");
             this.ui.connectionStatus.className = "mcp-plugin__connection-status info";
             this.state.socket.close();
-            this.state.socket = null;
             this.state.connected = false;
           }
+        }
+
+        /**
+         * Schedule an automatic reconnection with exponential backoff
+         */
+        scheduleReconnect() {
+          const maxAttempts = 10;
+          if (this.state.reconnectAttempts >= maxAttempts) {
+            this.updateStatus(false, "Reconnection failed after multiple attempts.<br>Try to reconnect clicking the button.");
+            this.state.reconnectAttempts = 0;
+            return;
+          }
+
+          const delay = Math.min(2000 * Math.pow(1.5, this.state.reconnectAttempts), 30000);
+          this.state.reconnectAttempts++;
+          const attempt = this.state.reconnectAttempts;
+
+          this.updateStatus(false, `Connection lost. Reconnecting (attempt ${attempt}/${maxAttempts})...`);
+          this.ui.connectionStatus.className = "mcp-plugin__connection-status info";
+
+          this.state.reconnectTimer = setTimeout(() => {
+            this.state.reconnectTimer = null;
+            if (!this.state.connected && !this.state.userDisconnect) {
+              this.connect(this.state.serverPort);
+            }
+          }, delay);
+        }
+
+        /**
+         * Cancel any pending reconnection attempt
+         */
+        cancelReconnect() {
+          if (this.state.reconnectTimer) {
+            clearTimeout(this.state.reconnectTimer);
+            this.state.reconnectTimer = null;
+          }
+          this.state.reconnectAttempts = 0;
         }
 
         /**
