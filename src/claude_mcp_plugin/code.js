@@ -158,8 +158,8 @@ async function handleCommand(command, params) {
       return await getStyles();
     case "get_local_components":
       return await getLocalComponents();
-    // case "get_team_components":
-    //   return await getTeamComponents();
+    case "get_library_components":
+      return await getLibraryComponents(params);
     case "create_component_instance":
       return await createComponentInstance(params);
     case "export_node_as_image":
@@ -204,7 +204,7 @@ async function handleCommand(command, params) {
     case "get_remote_components":
       return await getRemoteComponents(params);
     case "get_available_libraries":
-      return await getAvailableLibraries();
+      return await getAvailableLibraries(params);
     case "set_effects":
       return await setEffects(params);
     case "set_effect_style_id":
@@ -631,6 +631,8 @@ async function createText(params) {
     text = "Text",
     fontSize = 14,
     fontWeight = 400,
+    fontFamily,
+    fontStyle,
     fontColor = { r: 0, g: 0, b: 0, a: 1 }, // Default to black
     name = "Text",
     parentId,
@@ -669,15 +671,28 @@ async function createText(params) {
   textNode.x = x;
   textNode.y = y;
   textNode.name = name;
+  const resolvedFamily = fontFamily || "Inter";
+  const resolvedStyle = fontStyle || getFontStyle(fontWeight);
   try {
     await figma.loadFontAsync({
-      family: "Inter",
-      style: getFontStyle(fontWeight),
+      family: resolvedFamily,
+      style: resolvedStyle,
     });
-    textNode.fontName = { family: "Inter", style: getFontStyle(fontWeight) };
+    textNode.fontName = { family: resolvedFamily, style: resolvedStyle };
     textNode.fontSize = parseInt(fontSize);
   } catch (error) {
-    console.error("Error setting font size", error);
+    console.error(`Error setting font ${resolvedFamily} ${resolvedStyle}:`, error);
+    // Fallback to Inter if the requested font isn't available
+    if (resolvedFamily !== "Inter") {
+      try {
+        await figma.loadFontAsync({ family: "Inter", style: getFontStyle(fontWeight) });
+        textNode.fontName = { family: "Inter", style: getFontStyle(fontWeight) };
+        textNode.fontSize = parseInt(fontSize);
+        console.warn(`Fell back to Inter — "${resolvedFamily} ${resolvedStyle}" not available`);
+      } catch (fallbackError) {
+        console.error("Fallback font also failed:", fallbackError);
+      }
+    }
   }
   await setCharacters(textNode, text);
 
@@ -1141,24 +1156,34 @@ async function getLocalComponents() {
   };
 }
 
-// async function getTeamComponents() {
-//   try {
-//     const teamComponents =
-//       await figma.teamLibrary.getAvailableComponentsAsync();
+async function getLibraryComponents(params) {
+  const { nameFilter, libraryName } = params || {};
+  try {
+    const teamComponents =
+      await figma.teamLibrary.getAvailableComponentsAsync();
 
-//     return {
-//       count: teamComponents.length,
-//       components: teamComponents.map((component) => ({
-//         key: component.key,
-//         name: component.name,
-//         description: component.description,
-//         libraryName: component.libraryName,
-//       })),
-//     };
-//   } catch (error) {
-//     throw new Error(`Error getting team components: ${error.message}`);
-//   }
-// }
+    let filtered = teamComponents;
+    if (nameFilter) {
+      const lower = nameFilter.toLowerCase();
+      filtered = filtered.filter((c) => c.name.toLowerCase().includes(lower));
+    }
+    if (libraryName) {
+      filtered = filtered.filter((c) => c.libraryName === libraryName);
+    }
+
+    return {
+      count: filtered.length,
+      components: filtered.map((component) => ({
+        key: component.key,
+        name: component.name,
+        description: component.description,
+        libraryName: component.libraryName,
+      })),
+    };
+  } catch (error) {
+    throw new Error(`Error getting library components: ${error.message}`);
+  }
+}
 
 async function createComponentInstance(params) {
   const { componentKey, x = 0, y = 0, parentId } = params || {};
@@ -1198,42 +1223,53 @@ async function createComponentInstance(params) {
     }
 
     // If not found locally, try importing (for remote/team library components)
+    // Uses retry logic because first import of a remote component can be slow
     if (!component) {
-      console.log(`Component not found locally, trying import...`);
+      const MAX_IMPORT_ATTEMPTS = 3;
+      const IMPORT_TIMEOUT_MS = 30000;
 
-      let timeoutId;
-      const timeoutPromise = new Promise((_, reject) => {
-        timeoutId = setTimeout(() => {
-          reject(new Error("Timeout while importing component (10s). The component may be in a team library you don't have access to."));
-        }, 10000);
-      });
+      for (let attempt = 1; attempt <= MAX_IMPORT_ATTEMPTS; attempt++) {
+        console.log(`Component not found locally, import attempt ${attempt}/${MAX_IMPORT_ATTEMPTS}...`);
 
-      // Try importing as a single component first
-      try {
-        const importPromise = figma.importComponentByKeyAsync(componentKey);
-        component = await Promise.race([importPromise, timeoutPromise])
-          .finally(() => { clearTimeout(timeoutId); });
-      } catch (singleErr) {
-        console.log(`Not a single component, trying as component set...`);
-        // If that fails, try importing as a component set and pick the default variant
-        let timeoutId2;
-        const timeoutPromise2 = new Promise((_, reject) => {
-          timeoutId2 = setTimeout(() => {
-            reject(new Error("Timeout while importing component set (10s)."));
-          }, 10000);
+        let timeoutId;
+        const timeoutPromise = new Promise((_, reject) => {
+          timeoutId = setTimeout(() => {
+            reject(new Error(`Timeout while importing component (${IMPORT_TIMEOUT_MS / 1000}s).`));
+          }, IMPORT_TIMEOUT_MS);
         });
+
+        // Try importing as a single component first
         try {
-          const setImportPromise = figma.importComponentSetByKeyAsync(componentKey);
-          const componentSet = await Promise.race([setImportPromise, timeoutPromise2])
-            .finally(() => { clearTimeout(timeoutId2); });
-          if (componentSet && componentSet.type === "COMPONENT_SET" && componentSet.children.length > 0) {
-            // Pick the default variant (first child) — callers can use set_instance_variant afterwards
-            component = componentSet.defaultVariant || componentSet.children[0];
-            console.log(`Imported component set, using default variant: ${component.name}`);
+          const importPromise = figma.importComponentByKeyAsync(componentKey);
+          component = await Promise.race([importPromise, timeoutPromise])
+            .finally(() => { clearTimeout(timeoutId); });
+          break; // success
+        } catch (singleErr) {
+          console.log(`Not a single component, trying as component set...`);
+          // If that fails, try importing as a component set and pick the default variant
+          let timeoutId2;
+          const timeoutPromise2 = new Promise((_, reject) => {
+            timeoutId2 = setTimeout(() => {
+              reject(new Error(`Timeout while importing component set (${IMPORT_TIMEOUT_MS / 1000}s).`));
+            }, IMPORT_TIMEOUT_MS);
+          });
+          try {
+            const setImportPromise = figma.importComponentSetByKeyAsync(componentKey);
+            const componentSet = await Promise.race([setImportPromise, timeoutPromise2])
+              .finally(() => { clearTimeout(timeoutId2); });
+            if (componentSet && componentSet.type === "COMPONENT_SET" && componentSet.children.length > 0) {
+              // Pick the default variant (first child) — callers can use set_instance_variant afterwards
+              component = componentSet.defaultVariant || componentSet.children[0];
+              console.log(`Imported component set, using default variant: ${component.name}`);
+            }
+            break; // success
+          } catch (setErr) {
+            console.log(`Import attempt ${attempt} failed: ${singleErr.message}`);
+            if (attempt === MAX_IMPORT_ATTEMPTS) {
+              throw singleErr; // Re-throw original error on final attempt
+            }
+            console.log(`Retrying...`);
           }
-        } catch (setErr) {
-          console.log(`Component set import also failed: ${setErr.message}`);
-          throw singleErr; // Re-throw the original error
         }
       }
     }
@@ -3311,55 +3347,68 @@ async function getRemoteComponents(params) {
       collectInstances(figma.currentPage);
     }
 
-    // Second pass: resolve main components asynchronously
-    for (const instance of instances) {
-      try {
-        const mainComponent = await instance.getMainComponentAsync();
-        if (mainComponent && mainComponent.remote) {
-          const key = mainComponent.key;
-          if (!remoteComponents.has(key)) {
-            let libraryName = "";
-            try {
-              const parent = mainComponent.parent;
-              if (parent && parent.type === "COMPONENT_SET") {
-                libraryName = parent.name;
+    // Second pass: resolve main components asynchronously (chunked with progress)
+    const CHUNK_SIZE = 50;
+    const commandId = (params || {}).commandId;
+    for (let ci = 0; ci < instances.length; ci += CHUNK_SIZE) {
+      const chunk = instances.slice(ci, ci + CHUNK_SIZE);
+      for (const instance of chunk) {
+        try {
+          const mainComponent = await instance.getMainComponentAsync();
+          if (mainComponent && mainComponent.remote) {
+            const key = mainComponent.key;
+            if (!remoteComponents.has(key)) {
+              let libraryName = "";
+              try {
+                const parent = mainComponent.parent;
+                if (parent && parent.type === "COMPONENT_SET") {
+                  libraryName = parent.name;
+                }
+              } catch (e) {
+                // mainComponent parent may not be accessible for remote components
               }
-            } catch (e) {
-              // mainComponent parent may not be accessible for remote components
-            }
 
-            // Scan the first instance for text slots and fonts
-            var textSlots = [];
-            var fontSet = new Set();
-            try {
-              textSlots = collectTextSlots(instance);
-              textSlots.forEach(function(t) {
-                if (t.fontFamily) fontSet.add(t.fontFamily + "|" + t.fontStyle);
+              // Scan the first instance for text slots and fonts
+              var textSlots = [];
+              var fontSet = new Set();
+              try {
+                textSlots = collectTextSlots(instance);
+                textSlots.forEach(function(t) {
+                  if (t.fontFamily) fontSet.add(t.fontFamily + "|" + t.fontStyle);
+                });
+              } catch (e) {
+                // Non-fatal: text slot discovery is best-effort
+              }
+
+              remoteComponents.set(key, {
+                key: key,
+                name: mainComponent.name || instance.name,
+                description: mainComponent.description || "",
+                libraryName: libraryName,
+                componentId: mainComponent.id || "",
+                editableTextNodes: textSlots.map(function(t) {
+                  return { name: t.name, fontFamily: t.fontFamily, fontStyle: t.fontStyle };
+                }),
+                fonts: [...fontSet].map(function(k) {
+                  var parts = k.split("|");
+                  return { family: parts[0], style: parts[1] };
+                }),
               });
-            } catch (e) {
-              // Non-fatal: text slot discovery is best-effort
             }
-
-            remoteComponents.set(key, {
-              key: key,
-              name: mainComponent.name || instance.name,
-              description: mainComponent.description || "",
-              libraryName: libraryName,
-              componentId: mainComponent.id || "",
-              editableTextNodes: textSlots.map(function(t) {
-                return { name: t.name, fontFamily: t.fontFamily, fontStyle: t.fontStyle };
-              }),
-              fonts: [...fontSet].map(function(k) {
-                var parts = k.split("|");
-                return { family: parts[0], style: parts[1] };
-              }),
-            });
           }
+        } catch (e) {
+          // Skip instances where we can't resolve the main component
+          console.warn(`Could not resolve main component for instance "${instance.name}": ${e.message}`);
         }
-      } catch (e) {
-        // Skip instances where we can't resolve the main component
-        console.warn(`Could not resolve main component for instance "${instance.name}": ${e.message}`);
       }
+      // Send progress update to keep MCP timeout alive
+      const processed = Math.min(ci + CHUNK_SIZE, instances.length);
+      sendProgressUpdate(
+        commandId, "get_remote_components", "in_progress",
+        Math.round((processed / instances.length) * 100),
+        instances.length, processed,
+        `Resolved ${processed}/${instances.length} component instances...`
+      );
     }
 
     const components = Array.from(remoteComponents.values());
@@ -3377,16 +3426,20 @@ async function getRemoteComponents(params) {
   }
 }
 
-async function getAvailableLibraries() {
+async function getAvailableLibraries(params) {
   try {
     const libraries = [];
+    const commandId = (params || {}).commandId;
 
     // Get available variable collections (gives us library names)
     if (figma.teamLibrary) {
       try {
+        sendProgressUpdate(commandId, "get_available_libraries", "in_progress", 10, 1, 0, "Fetching library variable collections...");
         const varCollections = await figma.teamLibrary.getAvailableLibraryVariableCollectionsAsync();
+        sendProgressUpdate(commandId, "get_available_libraries", "in_progress", 50, varCollections.length, 0, `Processing ${varCollections.length} variable collections...`);
         const libraryMap = new Map();
-        for (const collection of varCollections) {
+        for (let ci = 0; ci < varCollections.length; ci++) {
+          const collection = varCollections[ci];
           if (!libraryMap.has(collection.libraryName)) {
             libraryMap.set(collection.libraryName, {
               name: collection.libraryName,
@@ -3397,6 +3450,14 @@ async function getAvailableLibraries() {
             name: collection.name,
             key: collection.key,
           });
+          // Send progress every 20 collections
+          if ((ci + 1) % 20 === 0 || ci === varCollections.length - 1) {
+            sendProgressUpdate(commandId, "get_available_libraries", "in_progress",
+              50 + Math.round(((ci + 1) / varCollections.length) * 50),
+              varCollections.length, ci + 1,
+              `Processed ${ci + 1}/${varCollections.length} variable collections...`
+            );
+          }
         }
         for (const lib of libraryMap.values()) {
           libraries.push(lib);
@@ -4276,14 +4337,23 @@ async function createLine(params) {
   // Generate SVG path data for the line
   const pathData = `M ${startX} ${startY} L ${endX} ${endY}`;
 
-  // Set vector paths
-  line.vectorPaths = [{
-    windingRule: "NONZERO",
-    data: pathData
-  }];
+  // Set per-vertex stroke caps via vectorNetwork (defines geometry + caps in one call)
+  var resolvedStartCap = params.startCap || "NONE";
+  var resolvedEndCap = params.endCap || "NONE";
+
+  await line.setVectorNetworkAsync({
+    vertices: [
+      { x: startX, y: startY, strokeCap: resolvedStartCap, strokeJoin: "MITER", cornerRadius: 0, handleMirroring: "NONE" },
+      { x: endX, y: endY, strokeCap: resolvedEndCap, strokeJoin: "MITER", cornerRadius: 0, handleMirroring: "NONE" }
+    ],
+    segments: [
+      { start: 0, end: 1, tangentStart: { x: 0, y: 0 }, tangentEnd: { x: 0, y: 0 } }
+    ],
+    regions: []
+  });
 
   // Set stroke color
-  const strokeStyle = {
+  line.strokes = [{
     type: "SOLID",
     color: {
       r: parseFloat(strokeColor.r) || 0,
@@ -4291,18 +4361,10 @@ async function createLine(params) {
       b: parseFloat(strokeColor.b) || 0,
     },
     opacity: parseFloat(strokeColor.a) || 1
-  };
-  line.strokes = [strokeStyle];
+  }];
 
-  // Set stroke weight
+  // Set stroke weight and clear fills
   line.strokeWeight = strokeWeight;
-
-  // Set stroke cap style if supported
-  if (["NONE", "ROUND", "SQUARE", "ARROW_LINES", "ARROW_EQUILATERAL"].includes(strokeCap)) {
-    line.strokeCap = strokeCap;
-  }
-
-  // Set fill to none (transparent) as lines typically don't have fills
   line.fills = [];
 
   // If parentId is provided, append to that node, otherwise append to current page
@@ -4319,19 +4381,13 @@ async function createLine(params) {
     figma.currentPage.appendChild(line);
   }
 
+  var resultId = "" + line.id;
+  var resultName = "" + line.name;
   return {
-    id: line.id,
-    name: line.name,
-    type: line.type,
-    x: line.x,
-    y: line.y,
-    width: line.width,
-    height: line.height,
-    strokeWeight: line.strokeWeight,
-    strokeCap: line.strokeCap,
-    strokes: line.strokes,
-    vectorPaths: line.vectorPaths,
-    parentId: line.parent ? line.parent.id : undefined
+    id: resultId,
+    name: resultName,
+    startCap: resolvedStartCap,
+    endCap: resolvedEndCap
   };
 }
 
@@ -4724,12 +4780,25 @@ async function getComponentSetInfo(params) {
       variantProperties: child.variantProperties || {}
     }));
 
+    // Discover text slots by creating a temporary instance
+    let textSlots = [];
+    if (defaultVariant) {
+      try {
+        const tempInstance = defaultVariant.createInstance();
+        textSlots = collectTextSlots(tempInstance);
+        tempInstance.remove();
+      } catch (e) {
+        console.log(`Could not discover text slots: ${e.message}`);
+      }
+    }
+
     return {
       isComponentSet: true,
       name: componentSet.name,
       key: componentSet.key,
       variantProperties,
       componentProperties,
+      textSlots,
       defaultVariantKey: defaultVariant ? defaultVariant.key : null,
       variants
     };
@@ -4746,11 +4815,22 @@ async function getComponentSetInfo(params) {
     }
   }
 
+  // Discover text slots by creating a temporary instance
+  let textSlots = [];
+  try {
+    const tempInstance = component.createInstance();
+    textSlots = collectTextSlots(tempInstance);
+    tempInstance.remove();
+  } catch (e) {
+    console.log(`Could not discover text slots: ${e.message}`);
+  }
+
   return {
     isComponentSet: false,
     name: component.name,
     key: component.key,
     componentProperties,
+    textSlots,
     variantProperties: component.variantProperties || null
   };
 }

@@ -156,6 +156,14 @@ export function registerCreationTools(server: McpServer): void {
         .number()
         .optional()
         .describe("Font weight (e.g., 400 for Regular, 700 for Bold)"),
+      fontFamily: z
+        .string()
+        .optional()
+        .describe("Font family name (e.g. 'Inter', 'Roboto'). Defaults to 'Inter'. Use the design system's font when known."),
+      fontStyle: z
+        .string()
+        .optional()
+        .describe("Font style (e.g. 'Regular', 'Bold', 'Medium'). Overrides fontWeight mapping when provided."),
       fontColor: z
         .object({
           r: z.number().min(0).max(1).describe("Red component (0-1)"),
@@ -193,7 +201,7 @@ export function registerCreationTools(server: McpServer): void {
         .describe("Fixed width for the text node. Use with textAutoResize HEIGHT for wrapping text within a specific width."),
       channel: z.string().optional().describe("Target channel to send the command to (uses active channel if omitted)"),
     },
-    async ({ x, y, text, fontSize, fontWeight, fontColor, name, parentId, textAlignHorizontal, textAutoResize, width, channel }) => {
+    async ({ x, y, text, fontSize, fontWeight, fontFamily, fontStyle, fontColor, name, parentId, textAlignHorizontal, textAutoResize, width, channel }) => {
       try {
         const result = await sendCommandToFigma("create_text", {
           x,
@@ -201,6 +209,8 @@ export function registerCreationTools(server: McpServer): void {
           text,
           fontSize: fontSize || 14,
           fontWeight: fontWeight || 400,
+          fontFamily,
+          fontStyle,
           fontColor: fontColor || { r: 0, g: 0, b: 0, a: 1 },
           name: name || "Text",
           parentId,
@@ -435,6 +445,73 @@ export function registerCreationTools(server: McpServer): void {
               text: `Error creating star: ${error instanceof Error ? error.message : String(error)}`
             }
           ]
+        };
+      }
+    }
+  );
+
+  // Create Line Tool
+  server.tool(
+    "create_line",
+    "Create a line (vector) in Figma with optional arrowheads. Works in regular design files (not just FigJam). Use strokeCap to add arrow endpoints.",
+    {
+      x1: z.number().describe("Start X position (local coordinates, relative to parent)"),
+      y1: z.number().describe("Start Y position (local coordinates, relative to parent)"),
+      x2: z.number().describe("End X position (local coordinates, relative to parent)"),
+      y2: z.number().describe("End Y position (local coordinates, relative to parent)"),
+      name: z.string().optional().describe("Optional name for the line"),
+      parentId: z.string().optional().describe("Optional parent node ID to append the line to"),
+      strokeColor: z
+        .object({
+          r: z.number().min(0).max(1).describe("Red component (0-1)"),
+          g: z.number().min(0).max(1).describe("Green component (0-1)"),
+          b: z.number().min(0).max(1).describe("Blue component (0-1)"),
+          a: z.number().min(0).max(1).optional().describe("Alpha component (0-1, default 1)"),
+        })
+        .optional()
+        .describe("Stroke color in RGBA format (default: white)"),
+      strokeWeight: z.number().positive().optional().describe("Stroke weight / line thickness (default: 1)"),
+      startCap: z
+        .enum(["NONE", "ROUND", "SQUARE", "ARROW_LINES", "ARROW_EQUILATERAL"])
+        .optional()
+        .describe("Stroke cap at the START point (x1,y1). Default: NONE"),
+      endCap: z
+        .enum(["NONE", "ROUND", "SQUARE", "ARROW_LINES", "ARROW_EQUILATERAL"])
+        .optional()
+        .describe("Stroke cap at the END point (x2,y2). Use ARROW_LINES for open arrowhead or ARROW_EQUILATERAL for filled triangle. Default: NONE"),
+      channel: z.string().optional().describe("Target channel to send the command to (uses active channel if omitted)"),
+    },
+    async ({ x1, y1, x2, y2, name, parentId, strokeColor, strokeWeight, startCap, endCap, channel }) => {
+      try {
+        const result = await sendCommandToFigma("create_line", {
+          x1,
+          y1,
+          x2,
+          y2,
+          name: name || "Line",
+          parentId,
+          strokeColor: strokeColor || { r: 1, g: 1, b: 1, a: 1 },
+          strokeWeight: strokeWeight || 1,
+          startCap: startCap || "NONE",
+          endCap: endCap || "NONE",
+        }, { channel });
+        const typedResult = result as { id: string; name: string; strokeCap: string };
+        return {
+          content: [
+            {
+              type: "text",
+              text: `Created line "${typedResult.name}" with ID: ${typedResult.id}, strokeCap: ${typedResult.strokeCap}`,
+            },
+          ],
+        };
+      } catch (error) {
+        return {
+          content: [
+            {
+              type: "text",
+              text: `Error creating line: ${error instanceof Error ? error.message : String(error)}`,
+            },
+          ],
         };
       }
     }

@@ -339,22 +339,33 @@ Create parent frames first, then add child elements. For forms/login screens:
 ## Building Screens from Components
 
 When a design system is available:
-1. Use get_all_components() to discover available components
-2. Use build_screen_from_template() to create an artboard and populate it with instances in one call
-3. Use create_instance_with_properties() for placing individual instances with property/variant configuration
+1. Use get_library_components() to discover ALL available team library components (not just those already in the doc)
+2. Use get_all_components(summary=true) for components already placed in the document
+3. **MANDATORY**: Call preflight_component_check() with all component keys you plan to use — this returns property keys, text slot names, and variant axes so you never have to guess
+4. Use build_screen_from_template() to create an artboard and populate it with instances in one call
+5. Use create_instance_with_properties() for placing individual instances with property/variant configuration
 
 ### Component Instance Placement
 
 - create_component_instance supports parentId — instances are placed directly inside the target frame
-- Fonts are auto-loaded when instances are created, so library components with custom fonts (e.g. "Rund Text") render correctly
+- Fonts are auto-loaded when instances are created, so library components with custom fonts render correctly
 - After placement in an auto-layout parent, use set_node_properties with layoutSizingHorizontal: "FILL" to stretch instances
+- NEVER guess property key formats — they differ between components. Always use preflight_component_check first.
 
 ### Building Forms with Library Fields
 
 Use build_screen_from_template to place all form field instances at once:
-- Set textOverrides on each component to configure labels, placeholders, and helper text (e.g. \`[{nodeName: "text-label", text: "Email"}, {nodeName: "Placeholder Text", text: "you@example.com"}]\`)
+- **First** call preflight_component_check with all component keys to discover the exact property keys and text node names
+- Set componentProperties using exact keys from the preflight (e.g. \`{"Label#73:17": "Email"}\` — NOT guessed)
+- Set textOverrides using exact node names from the preflight (e.g. \`[{nodeName: "text-label", text: "Email"}]\`)
 - Set width/height on each component to resize fields to match the form layout
-- Use get_node_info on a sample instance first to discover the names of nested text nodes
+
+### Font Handling for Manual Text
+
+When creating text with create_text (for labels, headings, etc. outside of components):
+- ALWAYS specify fontFamily and fontStyle matching the design system — the default is "Inter" which likely won't match
+- Discover the design system font by inspecting existing component instances with get_node_info
+- For scrollable pages, set the frame height to match content (use layoutSizingVertical: "HUG") rather than clipping at a viewport height
 
 ## Modifying Existing Elements
 

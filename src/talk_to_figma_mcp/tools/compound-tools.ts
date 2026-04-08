@@ -366,6 +366,8 @@ export function registerCompoundTools(server: McpServer): void {
               text: z.string().describe("Text content"),
               fontSize: z.number().optional().describe("Font size (default: 14)"),
               fontWeight: z.number().optional().describe("Font weight (default: 400)"),
+              fontFamily: z.string().optional().describe("Font family name. Defaults to 'Inter'. Use the design system's font when known."),
+              fontStyle: z.string().optional().describe("Font style (e.g. 'Regular', 'Bold'). Overrides fontWeight mapping."),
               fontColor: colorSchema.optional().describe("Font color (default: black)"),
               name: z.string().optional().describe("Node name"),
               parentId: z.string().optional().describe("Parent node ID"),
@@ -432,6 +434,8 @@ export function registerCompoundTools(server: McpServer): void {
               text: node.text,
               fontSize: node.fontSize || 14,
               fontWeight: node.fontWeight || 400,
+              fontFamily: node.fontFamily,
+              fontStyle: node.fontStyle,
               fontColor: node.fontColor || { r: 0, g: 0, b: 0, a: 1 },
               name: node.name || "Text",
               parentId: node.parentId,
@@ -514,7 +518,7 @@ export function registerCompoundTools(server: McpServer): void {
     async ({ filter, includeRemote = true, summary, channel }) => {
       try {
         // Fetch local components
-        const localResult = await sendCommandToFigma("get_local_components", {}, { channel });
+        const localResult = await sendCommandToFigma("get_local_components", {}, { channel, timeoutMs: 180000 });
         const typedLocal = localResult as {
           count: number;
           components: Array<{ id: string; name: string; key: string | null }>;
@@ -533,7 +537,7 @@ export function registerCompoundTools(server: McpServer): void {
         let remoteComponents: RemoteComponent[] = [];
         if (includeRemote) {
           try {
-            const remoteResult = await sendCommandToFigma("get_remote_components", {}, { channel });
+            const remoteResult = await sendCommandToFigma("get_remote_components", {}, { channel, timeoutMs: 180000 });
             const typedRemote = remoteResult as { components: RemoteComponent[] };
             remoteComponents = typedRemote.components ?? [];
           } catch {
@@ -659,6 +663,106 @@ export function registerCompoundTools(server: McpServer): void {
           ],
         };
       }
+    }
+  );
+
+  // ── Get Library Components ─────────────────────────────────────────────────
+  // Lists ALL components available from team libraries, not just those already
+  // used in the document. Uses figma.teamLibrary.getAvailableComponentsAsync().
+  server.tool(
+    "get_library_components",
+    "List ALL components available from team libraries — not just those already used in the document. Use this to discover components you haven't placed yet. Returns key, name, description, and library for each component.",
+    {
+      nameFilter: z.string().optional().describe("Case-insensitive substring filter on component name"),
+      libraryName: z.string().optional().describe("Filter by library name (exact match)"),
+      channel: z.string().optional().describe("Target channel to send the command to (uses active channel if omitted)"),
+    },
+    async ({ nameFilter, libraryName, channel }) => {
+      try {
+        const result = await sendCommandToFigma(
+          "get_library_components",
+          { nameFilter, libraryName },
+          { channel, timeoutMs: 120000 } // Library enumeration can be slow
+        );
+        const typedResult = result as { count: number; components: Array<{ key: string; name: string; description: string; libraryName: string }> };
+        const lines = typedResult.components.map(
+          (c) => `${c.name} | key: ${c.key} | ${c.libraryName}${c.description ? ` — ${c.description}` : ""}`
+        );
+        return {
+          content: [
+            {
+              type: "text",
+              text: `Found ${typedResult.count} library component(s):\n\n${lines.join("\n")}`,
+            },
+          ],
+        };
+      } catch (error) {
+        return {
+          content: [
+            {
+              type: "text",
+              text: `Error getting library components: ${error instanceof Error ? error.message : String(error)}`,
+            },
+          ],
+        };
+      }
+    }
+  );
+
+  // ── Preflight Component Check ─────────────────────────────────────────────
+  // Fetches property schemas, text slots, and variant axes for multiple
+  // components in one call. Use before build_screen_from_template to discover
+  // the correct property keys, text node names, and variant values.
+  server.tool(
+    "preflight_component_check",
+    "Fetch property schemas, text slots, and variant axes for multiple components in one call. Use this before build_screen_from_template or create_instance_with_properties to discover the correct property keys, text node names, and variant values for all components you plan to place. Prevents property key mismatches between different component types.",
+    {
+      componentKeys: z
+        .array(z.string())
+        .min(1)
+        .describe("Array of component keys to inspect"),
+      channel: z.string().optional().describe("Target channel to send the command to (uses active channel if omitted)"),
+    },
+    async ({ componentKeys, channel }) => {
+      const results: Record<string, unknown> = {};
+      const errors: string[] = [];
+
+      // Process with concurrency limit of 3
+      const concurrencyLimit = 3;
+      for (let i = 0; i < componentKeys.length; i += concurrencyLimit) {
+        const batch = componentKeys.slice(i, i + concurrencyLimit);
+        const batchResults = await Promise.allSettled(
+          batch.map(async (key) => {
+            const result = await sendCommandToFigma(
+              "get_component_set_info",
+              { componentKey: key },
+              { channel }
+            );
+            return { key, result };
+          })
+        );
+        for (const r of batchResults) {
+          if (r.status === "fulfilled") {
+            results[r.value.key] = r.value.result;
+          } else {
+            errors.push(r.reason?.message || String(r.reason));
+          }
+        }
+      }
+
+      const summary = Object.entries(results).map(([key, info]) => {
+        const typed = info as { name?: string; componentProperties?: Record<string, unknown>; textSlots?: unknown[]; variantProperties?: Record<string, unknown> };
+        return `## ${typed.name || key}\nKey: ${key}\nProperties: ${JSON.stringify(typed.componentProperties || {})}\nText slots: ${JSON.stringify(typed.textSlots || [])}\nVariants: ${JSON.stringify(typed.variantProperties || {})}`;
+      });
+
+      return {
+        content: [
+          {
+            type: "text",
+            text: `Preflight check for ${componentKeys.length} component(s):\n\n${summary.join("\n\n")}${errors.length > 0 ? `\n\nErrors:\n${errors.join("\n")}` : ""}`,
+          },
+        ],
+      };
     }
   );
 
@@ -979,43 +1083,76 @@ export function registerCompoundTools(server: McpServer): void {
       itemSpacing: z.number().optional().describe("Spacing between items (requires layoutMode)"),
       components: z
         .array(
-          z.object({
-            componentKey: z
-              .string()
-              .describe("Key of the component to place (from get_all_components, supports local and remote)"),
-            x: z.number().describe("X position relative to the screen frame"),
-            y: z.number().describe("Y position relative to the screen frame"),
-            name: z.string().optional().describe("Optional name override for the instance"),
-            componentProperties: z
-              .record(z.union([z.string(), z.boolean()]))
-              .optional()
-              .describe("Component property overrides (e.g. text or boolean inputs)"),
-            variantProperties: z
-              .record(z.string())
-              .optional()
-              .describe("Variant properties to set (e.g. { \"State\": \"Hover\" })"),
-            width: z.number().optional().describe("Resize instance to this width after placement"),
-            height: z.number().optional().describe("Resize instance to this height after placement"),
-            textOverrides: z
-              .array(
-                z.object({
-                  nodeName: z.string().describe("Name of the nested text node to update (e.g. 'text-label', 'Placeholder Text'). Matched by recursive name search within the instance."),
-                  text: z.string().describe("New text content for this node"),
+          z.union([
+            z.object({
+              type: z.literal("component").optional().default("component").describe("Item type — defaults to 'component'"),
+              componentKey: z
+                .string()
+                .describe("Key of the component to place (from get_all_components, supports local and remote)"),
+              x: z.number().optional().default(0).describe("X position relative to parent (only used when parent has no auto-layout)"),
+              y: z.number().optional().default(0).describe("Y position relative to parent (only used when parent has no auto-layout)"),
+              name: z.string().optional().describe("Optional name override for the instance"),
+              componentProperties: z
+                .record(z.union([z.string(), z.boolean()]))
+                .optional()
+                .describe("Component property overrides (e.g. text or boolean inputs)"),
+              variantProperties: z
+                .record(z.string())
+                .optional()
+                .describe("Variant properties to set (e.g. { \"State\": \"Hover\" })"),
+              width: z.number().optional().describe("Resize instance to this width after placement"),
+              height: z.number().optional().describe("Resize instance to this height after placement"),
+              textOverrides: z
+                .array(
+                  z.object({
+                    nodeName: z.string().describe("Name of the nested text node to update (e.g. 'text-label', 'Placeholder Text'). Matched by recursive name search within the instance."),
+                    text: z.string().describe("New text content for this node"),
+                  })
+                )
+                .optional()
+                .describe("Text content overrides for nested text nodes within the instance (e.g. setting labels and placeholders on a text-field component)"),
+              layoutSizingHorizontal: z
+                .enum(["FIXED", "HUG", "FILL"])
+                .optional()
+                .describe("Horizontal layout sizing for this instance (FILL to stretch in the auto-layout parent)"),
+              layoutSizingVertical: z
+                .enum(["FIXED", "HUG", "FILL"])
+                .optional()
+                .describe("Vertical layout sizing for this instance"),
+            }),
+            z.object({
+              type: z.literal("group").describe("Creates an intermediate auto-layout frame to group children (e.g. a horizontal row of fields)"),
+              name: z.string().optional().describe("Name for the group frame"),
+              layoutMode: z.enum(["HORIZONTAL", "VERTICAL"]).describe("Auto-layout direction for the group"),
+              itemSpacing: z.number().optional().describe("Spacing between items in the group"),
+              paddingTop: z.number().optional().describe("Top padding"),
+              paddingBottom: z.number().optional().describe("Bottom padding"),
+              paddingLeft: z.number().optional().describe("Left padding"),
+              paddingRight: z.number().optional().describe("Right padding"),
+              primaryAxisAlignItems: z.enum(["MIN", "CENTER", "MAX", "SPACE_BETWEEN"]).optional().describe("Alignment along primary axis"),
+              counterAxisAlignItems: z.enum(["MIN", "CENTER", "MAX"]).optional().describe("Alignment along counter axis"),
+              layoutSizingHorizontal: z
+                .enum(["FIXED", "HUG", "FILL"])
+                .optional()
+                .describe("Horizontal layout sizing for this group within its parent"),
+              layoutSizingVertical: z
+                .enum(["FIXED", "HUG", "FILL"])
+                .optional()
+                .describe("Vertical layout sizing for this group within its parent"),
+              fillColor: z
+                .object({
+                  r: z.number().min(0).max(1),
+                  g: z.number().min(0).max(1),
+                  b: z.number().min(0).max(1),
+                  a: z.number().min(0).max(1).optional(),
                 })
-              )
-              .optional()
-              .describe("Text content overrides for nested text nodes within the instance (e.g. setting labels and placeholders on a text-field component)"),
-            layoutSizingHorizontal: z
-              .enum(["FIXED", "HUG", "FILL"])
-              .optional()
-              .describe("Horizontal layout sizing for this instance (FILL to stretch in the auto-layout screen frame)"),
-            layoutSizingVertical: z
-              .enum(["FIXED", "HUG", "FILL"])
-              .optional()
-              .describe("Vertical layout sizing for this instance"),
-          })
+                .optional()
+                .describe("Optional background fill color for the group frame"),
+              children: z.array(z.any()).min(1).describe("Nested items (components or groups) to place inside this group — same schema as the top-level components array"),
+            }),
+          ])
         )
-        .describe("List of components to place inside the screen frame"),
+        .describe("List of components and/or groups to place inside the screen frame. Groups create intermediate auto-layout frames for row/column arrangements."),
       channel: z.string().optional().describe("Target channel to send the command to (uses active channel if omitted)"),
     },
     async ({ screenName, x, y, width, height, fillColor, layoutMode,
@@ -1047,96 +1184,159 @@ export function registerCompoundTools(server: McpServer): void {
           }, { channel });
         }
 
-        // Step 3: place each component instance inside the frame
-        const placed: Array<{ index: number; componentKey: string; name: string; id: string }> = [];
-        const failed: Array<{ index: number; componentKey: string; error: string }> = [];
+        // Step 3: recursively place items (components and groups) inside the frame
+        const placed: Array<{ index: string; type: string; name: string; id: string }> = [];
+        const failed: Array<{ index: string; type: string; error: string }> = [];
 
-        for (let i = 0; i < components.length; i++) {
-          const spec = components[i];
-          try {
-            // Create the instance directly inside the screen frame
-            const instanceResult = await sendCommandToFigma("create_component_instance", {
-              componentKey: spec.componentKey,
-              x: spec.x,
-              y: spec.y,
-              parentId: frameId,
-            }, { channel });
-            const typedInstance = instanceResult as { id: string; name: string; width?: number; height?: number };
-            const instanceId = typedInstance.id;
+        async function placeItems(
+          parentId: string,
+          items: any[],
+          indexPrefix: string = "",
+        ): Promise<void> {
+          for (let i = 0; i < items.length; i++) {
+            const item = items[i];
+            const idx = indexPrefix ? `${indexPrefix}.${i}` : `${i}`;
+            const itemType = item.type || "component";
 
-            // Apply component property overrides (text, boolean inputs)
-            if (spec.componentProperties && Object.keys(spec.componentProperties).length > 0) {
-              await sendCommandToFigma("set_component_property", {
-                nodeId: instanceId,
-                properties: spec.componentProperties,
-              }, { channel });
-            }
-
-            // Apply variant properties (State, Size, etc.)
-            if (spec.variantProperties && Object.keys(spec.variantProperties).length > 0) {
-              await sendCommandToFigma("set_instance_variant", {
-                nodeId: instanceId,
-                properties: spec.variantProperties,
-              }, { channel });
-            }
-
-            // Resize instance if width/height specified
-            if (spec.width !== undefined || spec.height !== undefined) {
-              const w = spec.width ?? typedInstance.width;
-              const h = spec.height ?? typedInstance.height;
-              if (w !== undefined && h !== undefined) {
-                await sendCommandToFigma("resize_node", {
-                  nodeId: instanceId,
-                  width: w,
-                  height: h,
+            try {
+              if (itemType === "group") {
+                // Create an intermediate auto-layout frame for the group
+                const groupFrame = await sendCommandToFigma("create_frame", {
+                  x: 0,
+                  y: 0,
+                  width: 100,
+                  height: 100,
+                  name: item.name || "Group",
+                  parentId,
+                  ...(item.fillColor ? { fillColor: item.fillColor } : {}),
                 }, { channel });
-              }
-            }
+                const typedGroup = groupFrame as { id: string; name: string };
+                const groupId = typedGroup.id;
 
-            // Apply text overrides on nested text nodes within the instance
-            if (spec.textOverrides && spec.textOverrides.length > 0) {
-              for (const override of spec.textOverrides) {
-                try {
-                  const findResult = await sendCommandToFigma("find_text_in_subtree", {
+                // Apply auto-layout to the group frame
+                await sendCommandToFigma("set_auto_layout", {
+                  nodeId: groupId,
+                  layoutMode: item.layoutMode,
+                  itemSpacing: item.itemSpacing,
+                  paddingTop: item.paddingTop,
+                  paddingBottom: item.paddingBottom,
+                  paddingLeft: item.paddingLeft,
+                  paddingRight: item.paddingRight,
+                  primaryAxisAlignItems: item.primaryAxisAlignItems,
+                  counterAxisAlignItems: item.counterAxisAlignItems,
+                }, { channel });
+
+                // Apply layout sizing for the group within its parent
+                const groupSizingProps: any = {};
+                if (item.layoutSizingHorizontal) groupSizingProps.layoutSizingHorizontal = item.layoutSizingHorizontal;
+                if (item.layoutSizingVertical) groupSizingProps.layoutSizingVertical = item.layoutSizingVertical;
+                if (Object.keys(groupSizingProps).length > 0) {
+                  await sendCommandToFigma("set_node_properties", {
+                    nodeId: groupId,
+                    ...groupSizingProps,
+                  }, { channel });
+                }
+
+                placed.push({
+                  index: idx,
+                  type: "group",
+                  name: item.name || "Group",
+                  id: groupId,
+                });
+
+                // Recurse into group children
+                if (item.children && item.children.length > 0) {
+                  await placeItems(groupId, item.children, idx);
+                }
+              } else {
+                // Place a component instance
+                const spec = item;
+                const instanceResult = await sendCommandToFigma("create_component_instance", {
+                  componentKey: spec.componentKey,
+                  x: spec.x ?? 0,
+                  y: spec.y ?? 0,
+                  parentId,
+                }, { channel });
+                const typedInstance = instanceResult as { id: string; name: string; width?: number; height?: number };
+                const instanceId = typedInstance.id;
+
+                // Apply component property overrides (text, boolean inputs)
+                if (spec.componentProperties && Object.keys(spec.componentProperties).length > 0) {
+                  await sendCommandToFigma("set_component_property", {
                     nodeId: instanceId,
-                    name: override.nodeName,
-                  }, { channel }) as { found: boolean; nodeId: string | null };
+                    properties: spec.componentProperties,
+                  }, { channel });
+                }
 
-                  if (findResult.found && findResult.nodeId) {
-                    await sendCommandToFigma("set_text_content", {
-                      nodeId: findResult.nodeId,
-                      text: override.text,
+                // Apply variant properties (State, Size, etc.)
+                if (spec.variantProperties && Object.keys(spec.variantProperties).length > 0) {
+                  await sendCommandToFigma("set_instance_variant", {
+                    nodeId: instanceId,
+                    properties: spec.variantProperties,
+                  }, { channel });
+                }
+
+                // Resize instance if width/height specified
+                if (spec.width !== undefined || spec.height !== undefined) {
+                  const w = spec.width ?? typedInstance.width;
+                  const h = spec.height ?? typedInstance.height;
+                  if (w !== undefined && h !== undefined) {
+                    await sendCommandToFigma("resize_node", {
+                      nodeId: instanceId,
+                      width: w,
+                      height: h,
                     }, { channel });
                   }
-                } catch {
-                  // Text override failures are non-fatal
                 }
+
+                // Apply text overrides on nested text nodes within the instance
+                if (spec.textOverrides && spec.textOverrides.length > 0) {
+                  for (const override of spec.textOverrides) {
+                    try {
+                      const findResult = await sendCommandToFigma("find_text_in_subtree", {
+                        nodeId: instanceId,
+                        name: override.nodeName,
+                      }, { channel }) as { found: boolean; nodeId: string | null };
+
+                      if (findResult.found && findResult.nodeId) {
+                        await sendCommandToFigma("set_text_content", {
+                          nodeId: findResult.nodeId,
+                          text: override.text,
+                        }, { channel });
+                      }
+                    } catch {
+                      // Text override failures are non-fatal
+                    }
+                  }
+                }
+
+                // Apply layout sizing if specified
+                if (spec.layoutSizingHorizontal !== undefined || spec.layoutSizingVertical !== undefined) {
+                  await sendCommandToFigma("set_node_properties", {
+                    nodeId: instanceId,
+                    layoutSizingHorizontal: spec.layoutSizingHorizontal,
+                    layoutSizingVertical: spec.layoutSizingVertical,
+                  }, { channel });
+                }
+
+                placed.push({
+                  index: idx,
+                  type: "component",
+                  name: spec.name || typedInstance.name,
+                  id: instanceId,
+                });
               }
+            } catch (error) {
+              failed.push({
+                index: idx,
+                type: itemType,
+                error: error instanceof Error ? error.message : String(error),
+              });
             }
-
-            // Apply layout sizing if specified
-            if (spec.layoutSizingHorizontal !== undefined || spec.layoutSizingVertical !== undefined) {
-              await sendCommandToFigma("set_node_properties", {
-                nodeId: instanceId,
-                layoutSizingHorizontal: spec.layoutSizingHorizontal,
-                layoutSizingVertical: spec.layoutSizingVertical,
-              }, { channel });
-            }
-
-            placed.push({
-              index: i,
-              componentKey: spec.componentKey,
-              name: spec.name || typedInstance.name,
-              id: instanceId,
-            });
-          } catch (error) {
-            failed.push({
-              index: i,
-              componentKey: spec.componentKey,
-              error: error instanceof Error ? error.message : String(error),
-            });
           }
         }
+
+        await placeItems(frameId, components);
 
         const lines: string[] = [
           `Created screen "${typedFrame.name}" (ID: ${frameId}) at (${x}, ${y}) — ${width}×${height}`,
@@ -1145,15 +1345,15 @@ export function registerCompoundTools(server: McpServer): void {
           lines.push(`Auto-layout: ${layoutMode}`);
         }
         if (placed.length > 0) {
-          lines.push(`\nPlaced ${placed.length} component(s):`);
+          lines.push(`\nPlaced ${placed.length} item(s):`);
           for (const p of placed) {
-            lines.push(`  [${p.index}] "${p.name}" — ID: ${p.id}`);
+            lines.push(`  [${p.index}] ${p.type === "group" ? "GROUP" : ""} "${p.name}" — ID: ${p.id}`);
           }
         }
         if (failed.length > 0) {
-          lines.push(`\nFailed to place ${failed.length} component(s):`);
+          lines.push(`\nFailed to place ${failed.length} item(s):`);
           for (const f of failed) {
-            lines.push(`  [${f.index}] ${f.componentKey} — ${f.error}`);
+            lines.push(`  [${f.index}] ${f.type} — ${f.error}`);
           }
         }
 
@@ -1637,7 +1837,7 @@ export function registerCompoundTools(server: McpServer): void {
               }
 
               case "library": {
-                const localResult = await sendCommandToFigma("get_local_components", {}, { channel });
+                const localResult = await sendCommandToFigma("get_local_components", {}, { channel, timeoutMs: 180000 });
                 const typedLocal = localResult as {
                   count: number;
                   components: Array<{ id: string; name: string; key: string | null }>;
@@ -1645,7 +1845,7 @@ export function registerCompoundTools(server: McpServer): void {
 
                 let remoteComponents: Array<{ key: string; name: string; libraryName: string }> = [];
                 try {
-                  const remoteResult = await sendCommandToFigma("get_remote_components", {}, { channel });
+                  const remoteResult = await sendCommandToFigma("get_remote_components", {}, { channel, timeoutMs: 180000 });
                   const typedRemote = remoteResult as { components: Array<{ key: string; name: string; libraryName: string }> };
                   remoteComponents = typedRemote.components ?? [];
                 } catch {

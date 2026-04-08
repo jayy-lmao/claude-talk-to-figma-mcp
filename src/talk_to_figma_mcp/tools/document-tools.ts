@@ -199,7 +199,7 @@ export function registerDocumentTools(server: McpServer): void {
     },
     async ({ channel }) => {
       try {
-        const result = await sendCommandToFigma("get_local_components", {}, { channel });
+        const result = await sendCommandToFigma("get_local_components", {}, { channel, timeoutMs: 180000 });
         return {
           content: [
             {
@@ -233,7 +233,7 @@ export function registerDocumentTools(server: McpServer): void {
     },
     async ({ libraryName, nameFilter, allPages, channel }) => {
       try {
-        const result = await sendCommandToFigma("get_remote_components", { libraryName, nameFilter, allPages }, { channel });
+        const result = await sendCommandToFigma("get_remote_components", { libraryName, nameFilter, allPages }, { channel, timeoutMs: 180000 });
         return {
           content: [
             {
@@ -264,7 +264,7 @@ export function registerDocumentTools(server: McpServer): void {
     },
     async ({ channel }) => {
       try {
-        const result = await sendCommandToFigma("get_available_libraries", {}, { channel });
+        const result = await sendCommandToFigma("get_available_libraries", {}, { channel, timeoutMs: 180000 });
         return {
           content: [
             {
